@@ -533,6 +533,8 @@ test('inferTaskType: a prompt that hands over tools is agentic, not research', (
   assert.equal(inferTaskType(example('agentic-tool-prompt.md')), 'agentic-workflow');
   assert.equal(inferTaskType('Research the impact of context length on accuracy.'), 'research');
   assert.equal(inferTaskType('Write an email to the team about the outage.'), 'correspondence');
+  assert.equal(inferTaskType('use the database tools to find inactive users'), 'agentic-workflow');
+  assert.equal(inferTaskType('Usa gli strumenti di ricerca per trovare tre fonti.'), 'agentic-workflow');
 });
 
 test('inferTaskType: padding does not decide the task type', () => {

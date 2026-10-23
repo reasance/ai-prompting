@@ -130,7 +130,7 @@ const TASK_TYPE_HINTS: Array<{ type: TaskType; patterns: RegExp[] }> = [
     // output template.
     type: 'agentic-workflow',
     patterns: [
-      /\b(?:you\s+are\s+an?\s+(?:\w+\s+)?agent\b|agent\s+with\b|sei\s+un\s+agente\b|tools?\s*:|strumenti\s*:|tool[- ]?use\b|tool\s+calls?\b|web_search\b|code_exec\b)/i,
+      /\b(?:you\s+are\s+an?\s+(?:\w+\s+)?agent\b|agent\s+with\b|sei\s+un\s+agente\b|tools?\s*:|strumenti\s*:|tool[- ]?use\b|tool\s+calls?\b|web_search\b|code_exec\b|(?:use|usa)\s+(?:the\s+|gli\s+|i\s+)?(?:\w+\s+)?(?:tools?|strumenti)\b)/i,
     ],
   },
   {
