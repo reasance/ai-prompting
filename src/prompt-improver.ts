@@ -797,7 +797,6 @@ function buildScaffold(
 export function improvePrompt(opts: PromptImproverOptions): ImprovementResult {
   const original = (opts.originalPrompt ?? '').toString();
   const lang = detectLanguage(original, opts.language);
-  const taskType = inferTaskType(original, opts.taskType);
   const mode: OutputMode = opts.outputMode || 'standard';
 
   const changes: ImprovementChange[] = [];
@@ -813,7 +812,7 @@ export function improvePrompt(opts: PromptImproverOptions): ImprovementResult {
           : '[No prompt provided. Provide at least one descriptive sentence.]',
       mode,
       language: lang,
-      taskType,
+      taskType: inferTaskType(original, opts.taskType),
       scores: {
         before: scorePrompt(''),
         after: scorePrompt(''),
@@ -840,6 +839,9 @@ export function improvePrompt(opts: PromptImproverOptions): ImprovementResult {
   }
 
   const { cleaned, removed } = stripPadding(original);
+  // Classify the request, not its padding: "world-class" used to match the
+  // coding keyword `class` and turn a writing prompt into a refactor.
+  const taskType = inferTaskType(cleaned, opts.taskType);
   if (removed.length) {
     for (const r of removed) {
       changes.push({ type: 'removed_padding', detail: `Removed: ${r.label}` });

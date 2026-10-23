@@ -1,0 +1,50 @@
+name: Model notes reminder
+
+# Model- and host-specific notes carry a "_Verified YYYY-MM-DD against:" stamp.
+# Once a month, open (or refresh) one issue listing the stamps older than 90
+# days, so re-verification happens on a quarterly cadence without failing CI.
+
+on:
+  schedule:
+    - cron: '0 8 1 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Find stale stamps
+        id: check
+        run: |
+          node scripts/check-verified.js --json > stale.json
+          echo "count=$(node -e "console.log(require('./stale.json').stale.length)")" >> "$GITHUB_OUTPUT"
+
+      - name: Open or update the reminder issue
+        if: steps.check.outputs.count != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="Re-verify model notes (stamps older than 90 days)"
+          {
+            echo "These sections were last verified more than 90 days ago:"
+            echo
+            node -e "for (const s of require('./stale.json').stale) console.log('- \`' + s.file + ':' + s.line + '\` ' + s.section + ' — verified ' + s.verified + ' (' + s.ageDays + ' days)')"
+            echo
+            echo "Re-run the model evaluation, update the notes, and bump each stamp."
+          } > body.md
+          existing=$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[0].number')
+          if [ -n "$existing" ]; then
+            gh issue edit "$existing" --body-file body.md
+          else
+            gh issue create --title "$title" --body-file body.md
+          fi

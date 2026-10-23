@@ -1,15 +1,13 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 // Tests run from dist/tests/, so the package root is two levels up.
 const packageRoot = join(__dirname, '..', '..');
 const skillContent = readFileSync(join(packageRoot, 'SKILL.md'), 'utf8');
-const slashContent = readFileSync(
-  join(packageRoot, '.claude', 'commands', 'improve.md'),
-  'utf8'
-);
+const referenceFiles = readdirSync(join(packageRoot, 'references')).filter((f) => f.endsWith('.md'));
+const readRef = (f: string): string => readFileSync(join(packageRoot, 'references', f), 'utf8');
 
 /** Slice a markdown file down to a single `## heading` section. */
 function section(md: string, heading: string): string {
@@ -39,67 +37,80 @@ test('SKILL.md: reference cross-links resolve to real anchors', () => {
   assert.match(skillContent, /references\/clarification-policy\.md#policy-overrides/);
 });
 
-// The slash command is an adapter, not a second copy of the procedure. Every
-// assertion below is a *negative* one: it fails the moment someone inlines a
-// piece of SKILL.md back into it. This replaces the old keep-both-in-sync test,
-// which locked the duplication in place instead of preventing it.
-test('Slash command: does not restate the procedure', () => {
-  const forbidden: Array<[RegExp, string]> = [
-    [/Cosa fai adesso\?/, 'Italian choice block'],
-    [/What next\?/, 'English choice block'],
-    [/## Prompt migliorato/, 'Italian output template'],
-    [/## Improved prompt/, 'English output template'],
-    [/<quality_bar>/, 'XML scaffold'],
-    [/<role>/, 'XML scaffold'],
-    [/respiro profondo/, 'padding phrase list'],
-    [/world-class/, 'padding phrase list'],
-    [/intent clarity 15/i, 'rubric weights'],
+/** GitHub's heading slug: lowercase, punctuation dropped, spaces to hyphens. */
+function slug(heading: string): string {
+  return heading.trim().toLowerCase().replace(/[^\p{L}\p{N} _-]/gu, '').replace(/ /g, '-');
+}
+
+test('markdown links: every #anchor into a reference file exists', () => {
+  const sources: Array<[string, string]> = [
+    ['SKILL.md', skillContent],
+    ...referenceFiles.map((f) => [`references/${f}`, readRef(f)] as [string, string]),
   ];
-  for (const [re, what] of forbidden) {
-    assert.doesNotMatch(
-      slashContent,
-      re,
-      `${what} was inlined into the slash command — it belongs in SKILL.md only`
-    );
+  for (const [from, text] of sources) {
+    for (const m of text.matchAll(/\]\(((?:references\/)?[\w-]+\.md)?#([\w-]+)\)/g)) {
+      const target = m[1] ? m[1].replace(/^references\//, '') : from.replace(/^references\//, '');
+      const body = target === 'SKILL.md' ? skillContent : readRef(target);
+      const anchors = [...body.matchAll(/^#{1,6}\s+(.+)$/gm)].map((h) => slug(h[1]));
+      assert.ok(anchors.includes(m[2]), `${from} links to ${target}#${m[2]}, which does not exist`);
+    }
   }
 });
 
-test('Slash command: delegates to SKILL.md and stays thin', () => {
-  assert.match(slashContent, /SKILL\.md/, 'slash command must point at the canonical procedure');
-  const lines = slashContent.split('\n').length;
-  assert.ok(
-    lines < 80,
-    `slash command grew to ${lines} lines — it is an adapter; push procedure into SKILL.md`
-  );
+// Commands and skills are one surface now: hosts invoke the Skill directly and
+// it reads its own flags. A second adapter file is how the two drifted before.
+test('SKILL.md: the Skill reads its own flags; no separate command adapter ships', () => {
+  assert.match(skillContent, /\*\*Invoked with arguments\*\*/);
+  assert.ok(!existsSync(join(packageRoot, '.claude', 'commands', 'improve.md')),
+    'the command adapter was merged into SKILL.md and must not come back');
+  const pkg = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8'));
+  assert.ok(!pkg.files.includes('.claude/'), 'package.json still ships the removed .claude/ directory');
 });
 
-test('Slash command: flag table agrees with the SKILL.md Options table', () => {
-  // SKILL.md rows: | `option` | `--flag` | values | default | effect |
-  const canonical = new Map(
-    [...section(skillContent, 'Options').matchAll(/^\|\s*`([A-Za-z]+)`\s*\|\s*`(--[a-z-]+)`\s*\|/gm)].map(
-      (m) => [m[2], m[1]] as const
-    )
-  );
-  // Slash command rows: | `--flag` | `option` |
-  const adapter = new Map(
-    [...slashContent.matchAll(/^\|\s*`(--[a-z-]+)`\s*\|\s*`([A-Za-z]+)`\s*\|/gm)].map(
-      (m) => [m[1], m[2]] as const
-    )
-  );
+test('SKILL.md: user instructions take precedence over the Skill', () => {
+  assert.match(skillContent, /The user's instructions take precedence over this Skill\./);
+});
 
-  assert.ok(canonical.size >= 7, `expected >= 7 options in SKILL.md, got ${canonical.size}`);
-  assert.deepEqual(
-    [...adapter.keys()].sort(),
-    [...canonical.keys()].sort(),
-    'the slash command and SKILL.md expose different flag sets'
-  );
-  for (const [flag, option] of adapter) {
-    assert.equal(
-      option,
-      canonical.get(flag),
-      `${flag} maps to "${option}" in the slash command but "${canonical.get(flag)}" in SKILL.md`
-    );
+test('SKILL.md: frontmatter stays at name + description', () => {
+  // Outside Claude Code, unknown frontmatter fields are a hard error.
+  const fm = skillContent.match(/^---\n([\s\S]*?)\n---/);
+  assert.ok(fm, 'frontmatter present');
+  const keys = [...fm![1].matchAll(/^([a-z_-]+):/gm)].map((m) => m[1]);
+  assert.deepEqual(keys, ['name', 'description']);
+});
+
+// Every claim about a specific model or host is dated, so staleness is visible.
+// scripts/check-verified.js warns on stamps older than 90 days.
+test('agent-compatibility.md: every vendor and host section carries a Verified stamp', () => {
+  const doc = readRef('agent-compatibility.md');
+  const vendorNotes = section(doc, 'Vendor notes');
+  const notes = vendorNotes.split(/\n(?=### )/).slice(1);
+  assert.ok(notes.length >= 7, `expected >= 7 vendor notes, got ${notes.length}`);
+  for (const note of notes) {
+    assert.match(note, /_Verified \d{4}-\d{2}-\d{2} against: \S/, `missing stamp in "${note.split('\n')[0]}"`);
   }
+  for (const heading of ['Capability matrix', 'Skill-based hosts']) {
+    assert.match(section(doc, heading), /_Verified \d{4}-\d{2}-\d{2} against: \S/, `missing stamp in "${heading}"`);
+  }
+});
+
+// Some current models refuse a request to write their reasoning out, and it is
+// billed. No template we ship may ask for one.
+test('references: no shipped template asks for the model\'s reasoning', () => {
+  for (const f of referenceFiles) {
+    const blocks = [...readRef(f).matchAll(/```[\s\S]*?```/g)].map((m) => m[0]);
+    for (const block of blocks) {
+      assert.doesNotMatch(block, /<(thinking|analysis|reasoning|scratchpad)>/i, `${f}: template asks for a reasoning section`);
+      assert.doesNotMatch(block, /step trace/i, `${f}: template asks for a step trace`);
+    }
+  }
+});
+
+test('agents/openai.yaml: documented Codex schema, no version to drift', () => {
+  const yaml = readFileSync(join(packageRoot, 'agents', 'openai.yaml'), 'utf8');
+  assert.match(yaml, /^interface:\n\s+display_name: ai-prompting$/m);
+  assert.doesNotMatch(yaml, /^version:/m, 'a version field drifted from package.json once already');
+  assert.doesNotMatch(yaml, /^(entrypoint|capabilities|triggers|modes):/m, 'undocumented keys');
 });
 
 test('clarification-policy.md: linked sections are anchored', () => {

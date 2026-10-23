@@ -35,7 +35,7 @@ In a Claude Code session (or any host that supports Skills) the same logic is in
 - [How it works](#how-it-works)
 - [Install](#install)
 - [CLI](#cli)
-- [Slash command](#slash-command)
+- [Install as a Skill](#install-as-a-skill)
 - [Library API](#library-api)
 - [Output modes](#output-modes)
 - [The 100-point rubric](#the-100-point-rubric)
@@ -156,25 +156,38 @@ ai-prompting --help
 Unknown flags, missing values, invalid enum values, and passing more than one input source are
 errors, not warnings — the CLI is meant to be safe in a CI gate.
 
-## Slash command
+## Install as a Skill
 
-A slash command ships at `.claude/commands/improve.md` for hosts that support the Agent Skills Open Standard. Install it system-wide:
+The Skill is one directory — `SKILL.md`, `references/`, `agents/` — following the Agent Skills
+standard ([agentskills.io](https://agentskills.io)). Copy it to where your hosts look for skills:
 
 ```bash
-npm run install-command            # detects supported hosts and copies the file
-npm run install-command -- --list  # show targets
-npm run install-command -- --host claude --force
+npm run install-skill            # every detected host
+npm run install-skill -- --list  # targets and which hosts each one serves
+npm run install-skill -- --host claude --force
 ```
 
-Auto-detected: **Claude Code** (`~/.claude/commands/`), **OpenAI Codex CLI** (`~/.codex/commands/`), **Cursor** (`~/.cursor/commands/`). Add more in `scripts/install-command.js` (5 lines per host).
+| `--host` | Installs to | Serves |
+|---|---|---|
+| `claude` | `~/.claude/skills/ai-prompting/` | Claude Code |
+| `agents` | `~/.agents/skills/ai-prompting/` | Codex CLI / IDE, Gemini CLI, Grok Build |
+| `vibe` | `~/.vibe/skills/ai-prompting/` | Mistral Vibe |
+| `qwen` | `~/.qwen/skills/ai-prompting/` | Qwen Code |
+| `cursor` | `~/.cursor/commands/ai-prompting.md` | Cursor — a short command that points at the shared `SKILL.md` |
 
-Once installed, in a Claude Code session:
+Once installed, the host picks the Skill up from its description, or you invoke it directly — in
+Claude Code:
 
 ```
-/ai-prompting:improve <prompt> [--mode …] [--target …] [--task …] [--language …] [--audience "…"] [--token-budget …] [--clarify auto|always|never]
+/ai-prompting <prompt> [--mode …] [--target …] [--task …] [--language …] [--audience "…"] [--token-budget …] [--clarify auto|always|never]
 ```
 
-Natural-language fallbacks work too: *"in italiano"*, *"non chiedere"*, *"solo prompt"*, *"compatto"*, *"in dettaglio"*. Flags always win over fallbacks.
+In Codex, `$ai-prompting`. Natural-language fallbacks work too: *"in italiano"*, *"non chiedere"*,
+*"solo prompt"*, *"compatto"*, *"in dettaglio"*. Flags always win over fallbacks.
+
+**Upgrading from 0.3.x:** the separate `/ai-prompting:improve` command is gone — it was a second
+entry for the same Skill. `install-skill` removes `~/.claude/commands/ai-prompting:improve.md` when it
+installs the Claude Code skill. `npm run install-command` still works as an alias until 0.5.0.
 
 ## Library API
 
@@ -235,21 +248,19 @@ Total = **100**. Scores are heuristic estimates, not guaranteed performance gain
 
 ## Agent compatibility
 
-The package follows the **Agent Skills Open Standard** (Anthropic, December 2025). As of 2026, ~32 host tools read `SKILL.md` from the conventional directory.
+**Hosts.** Any host on the Agent Skills standard reads `SKILL.md` from its skills directory — see
+[Install as a Skill](#install-as-a-skill) for the verified locations. ChatGPT gets skills through
+plugins; `agents/openai.yaml` is only UI metadata for Codex / ChatGPT. Gemini CLI has served only paid
+Gemini API and Enterprise keys since 2026-06-18. Hosts without skill support can call
+`improvePrompt()` as a tool.
 
-| Host | Reads `SKILL.md` natively | Slash command directory |
-|---|---|---|
-| Claude Code | ✓ | `~/.claude/commands/` |
-| OpenAI Codex CLI | ✓ | `~/.codex/commands/` |
-| ChatGPT (Apps SDK) | ✓ via Apps SDK | uses `agents/openai.yaml` |
-| Cursor | ✓ | `~/.cursor/commands/` |
-| Gemini CLI | ✓ | `~/.gemini/commands/` (add to installer) |
-| JetBrains Junie | ✓ | proprietary mechanism |
-| Block Goose | ✓ | `.goose/commands/` |
-| AWS Kiro | ✓ | proprietary manifest |
-| Older custom integrations | adapter required | call `improvePrompt()` as a tool |
-
-Adapter notes per target are in [`references/agent-compatibility.md`](references/agent-compatibility.md).
+**Target models.** When you name a target (`--target opus-5.5`, `gpt-6`, `gemini-4`, `qwen3.8-27b`,
+…), the Skill adapts the rewrite by *behavior* rather than by brand: how the model's reasoning depth
+is controlled, whether sampling parameters still apply, what structured output it guarantees,
+whether it accepts a prefilled answer, how it handles tools. The
+[capability matrix](references/agent-compatibility.md#capability-matrix) covers Anthropic, OpenAI,
+Google, xAI, Meta, Mistral, DeepSeek, Qwen, Kimi, GLM and MiniMax; every vendor note is dated, and
+`npm run check-verified` lists notes older than 90 days.
 
 ## Examples (input → output)
 
@@ -263,18 +274,16 @@ You are a world-class expert. Take a deep breath. Help me write something good.
 **Output (`standard` mode, English):**
 ```
 ## Improved prompt
-<role>Expert generalist assistant — precise and direct.</role>
-<objective>Write something good.</objective>
-<context>[ASSUMPTION: no additional context provided; the model should flag any load-bearing assumptions]</context>
+<role>Senior editor focused on clarity, rhythm, and audience fit.</role>
+<context>[ASSUMPTION: no separate context block; the facts stated in the task are the context — flag load-bearing assumptions]</context>
 <task>Help me write something good.</task>
 <constraints>
-- Explicitly distinguish facts, inferences, and assumptions.
-- If critical information is missing, declare it rather than inventing.
+- Unknown specifics (names, dates, figures) go in [brackets]; never invent them.
 </constraints>
-<output_format>Structured, direct answer; length calibrated to task complexity.</output_format>
+<output_format>Flowing prose; 60-90 word paragraphs; no bullets unless a real list; title + subtitle when appropriate.</output_format>
 <quality_bar>...</quality_bar>
 
-Structural coverage — Original: 30/100  →  Improved: 79/100  (Δ +49)
+Structural coverage — Original: 34/100  →  Improved: 66/100  (Δ +32)
 ```
 
 ### An Italian prompt with persona padding
@@ -286,9 +295,9 @@ Sei un esperto di livello mondiale. Aiutami a scrivere una mail per chiedere un 
 
 **Output (`standard` mode, Italian — note the auto-detect):**
 - Stripped Italian padding (`Sei un esperto di livello mondiale`)
-- Nominalized opener (`Aiutami a scrivere…` → objective: `Scrivere una mail…`)
-- Task type → `writing`, role → `Senior editor con focus su chiarezza, ritmo e adeguatezza al pubblico.`
-- Structural coverage 32 → 84 (Δ +52)
+- One sentence left, so it becomes the `<task>` as written — no `<objective>` repeating it
+- Task type → `correspondence`, role → `Redattore di corrispondenza professionale: chiaro, responsabile, chiude con un prossimo passo concreto.`, format → subject, greeting, short paragraphs, next step, sign-off
+- Structural coverage 36 → 63 (Δ +27)
 
 ### A high-risk prompt — triggers clarification
 
@@ -313,14 +322,14 @@ More examples in [`examples/`](examples/).
 $ npx ai-prompting doctor
 AIPrompting Doctor
 ✓ Node.js >= 18 (node v20.10.0)
-✓ package.json valid + bin entry (version 0.3.2)
+✓ package.json valid + bin entry (version 0.4.0)
 ✓ SKILL.md frontmatter (name, description) (name ✓, description ✓)
 ✓ references/ files (5/5)
 ✓ bin/ai-prompting executable
 ✓ compiled CLI artifact (dist)
 ✓ smoke test (improvePrompt) (improved length=721, delta=44)
 Status: OK
-Node: 20.10.0 | Package: 0.3.2
+Node: 20.10.0 | Package: 0.4.0
 ```
 
 If a check fails, the doctor prints a `fix:` line for it.
@@ -339,7 +348,7 @@ If a check fails, the doctor prints a `fix:` line for it.
 
 **Can I add a new task type / target agent?** Yes — see [CONTRIBUTING.md](CONTRIBUTING.md). It's two file edits and a regression test.
 
-**What happens to "think step by step"?** The CLI always strips it. Modern reasoning models (Claude 4.x, GPT-5.x, Gemini 2.5+) reason adaptively, so explicit CoT instructions are redundant or counterproductive there — but that is not true of small local models, and the CLI has no adapter that knows the difference. Earlier versions of this FAQ claimed `--target local` preserved it; that was never implemented, and the flag has been removed from the CLI rather than left as a decorative no-op. If you are targeting a local model, keep the CoT line yourself, or apply the Skill through an agent, which does adapt.
+**What happens to "think step by step"?** The CLI always strips it. The criterion is whether the target model has a reasoning control — an effort / thinking parameter or a thinking mode — and as of late 2026 that covers every current hosted model and the open-weight models people run locally (Qwen3.8, gpt-oss, Gemma 4, Muse Glimmer, Mistral Small 4). For those, an explicit CoT line is redundant, and asking a model to write its reasoning out can even be refused (Claude Fable/Opus/Sonnet 5.x). It still helps a non-reasoning instruct checkpoint (Llama 3.x / 4, Mistral Small 3.x and older). The CLI cannot tell which model you target, so if you use one of those, keep the CoT line yourself — or apply the Skill through an agent, which does adapt. Details: [cost-control](references/cost-control.md#when-to-skip-think-step-by-step).
 
 **Why is there no `--target` on the CLI?** Because it changed nothing. `--target local` and `--target claude` produced byte-identical output. `targetAgent` remains a Skill and library option, where an agent can genuinely adapt the rewrite; the deterministic CLI will get the flag back when it has real adapter branches and tests that prove they fire.
 
@@ -347,7 +356,7 @@ If a check fails, the doctor prints a `fix:` line for it.
 
 ## Limitations
 
-- **CLI = deterministic baseline.** It guarantees structural scaffolding and padding removal; it does not perform semantic rewriting. The richer rewrite happens when an agent host applies the Skill.
+- **CLI = deterministic baseline.** It guarantees structural scaffolding and padding removal; it does not perform semantic rewriting. The scaffold adds defaults only where the prompt is silent, and never overrides a length, count or format the prompt states. A frontier model usually gains little from the CLI beyond padding removal — the semantic rewrite happens when an agent host applies the Skill.
 - **Scores are heuristic.** Useful for relative comparison (before vs after, variant A vs B); not a direct performance metric.
 - **Language detection** weighs Italian evidence against English evidence (function words, action verbs, accents, elisions, Italian-only morphology) and picks the larger pile; English wins ties. Tokens shared by both languages are excluded so they cannot tip it. It is still a heuristic: a one-or-two-word prompt carries no evidence and falls back to English, and a third language is classified as English. Pass `--language en|it` for certainty.
 - **Padding patterns** are explicit regexes; novel padding phrases may slip through. Open an issue with the example.

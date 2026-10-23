@@ -1,6 +1,6 @@
 {
   "name": "ai-prompting",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "description": "Improve, rewrite, debug, evaluate, and compress prompts for any LLM agent. Ships an installable Skill plus a deterministic local CLI.",
   "keywords": [
     "prompt-engineering",
@@ -32,7 +32,6 @@
     "bin/",
     "dist/src/",
     "scripts/",
-    ".claude/",
     "SKILL.md",
     "references/",
     "agents/",
@@ -45,9 +44,11 @@
     "build": "tsc",
     "test": "npm run build && node --test dist/tests/*.test.js",
     "doctor": "node dist/src/cli.js doctor",
-    "install-command": "node scripts/install-command.js",
+    "install-skill": "node scripts/install-skill.js",
+    "check-verified": "node scripts/check-verified.js",
     "prepare": "npm run build",
-    "prepublishOnly": "npm test && npm run doctor"
+    "prepublishOnly": "npm test && npm run doctor",
+    "install-command": "node scripts/install-skill.js"
   },
   "publishConfig": {
     "access": "public"

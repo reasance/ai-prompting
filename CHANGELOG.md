@@ -5,6 +5,79 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] — 2026-10-23
+
+A model-landscape review (latest releases from Anthropic, OpenAI, Google, xAI, Meta, Mistral,
+DeepSeek, Qwen, Moonshot, Zhipu and MiniMax, checked against their official docs) plus a
+qualitative probe: two Claude models (Haiku 5.5, Opus 5.5) read three example prompts before and
+after the CLI and preferred the original in all three. That is a self-report on three prompts, not a
+benchmark — but each reason they gave traced to a real defect, fixed below.
+
+### Fixed
+
+- **Padding removal left fragments.** Overlapping patterns were removed one at a time, so the first
+  removal ate part of the second: `examples/coding-prompt.md` shipped `Take a deep breath and` inside
+  `<task>`. Matches are now merged and spliced out in one pass, and a connective left hanging
+  (`… and`, `… e`) goes with them.
+- **A stated output spec was overwritten.** "200-word summary plus three follow-up questions" became
+  the research default "Summary (3-5 sentences)", and the quality bar made the contradiction
+  binding. A length, count or format the prompt states (or an `Output:` line) now replaces the
+  task-type default, and the quality bar points at it.
+- **Research defaults on every task.** "Distinguish facts, inferences, assumptions" and "every claim
+  has a source" were added to emails and refactors. Default constraints and quality bars are now
+  keyed on the task type; a default the task already states is skipped, and an empty constraints
+  block is omitted.
+- **`<objective>` repeated `<task>`.** The objective is now lifted out of the body instead of copied;
+  a one-sentence prompt is scaffolded as `<task>` alone.
+- **The context placeholder said "no additional context provided"** even when the body stated facts
+  (TypeScript 5.4, Node 20, no ESM). It now says the facts in the task are the context.
+- **Padding decided the task type.** Classification ran before padding removal, and "world-class"
+  matched the coding keyword `class`.
+- **A prompt that hands the model tools was classified as research** and got a research analyst role.
+  It is now `agentic-workflow`, whose role and format describe running the task, not designing a
+  workflow.
+
+### Added
+
+- **`correspondence` task type** (email, letter, reply): subject, greeting, short paragraphs, a
+  concrete next step, sign-off; unknown specifics as `[placeholders]`. Previously an email got the
+  article template ("60-90 word paragraphs; title + subtitle").
+- **Capability matrix.** `references/agent-compatibility.md` is reorganized around behavior —
+  reasoning control, sampling policy, structured output, prefill, tools, reasoning replay — with one
+  row per vendor and dated vendor notes for all eleven labs above. `targetAgent` accepts any model or
+  vendor name and resolves to a row; an unknown model is handled by the same criteria from its model
+  card.
+- **Dated claims.** Every vendor note and host section carries `_Verified YYYY-MM-DD against:
+  <sources>_`. `npm run check-verified` lists stamps older than 90 days; CI prints them as warnings
+  (never failures), and a monthly workflow opens a reminder issue.
+- **Skill installer.** `npm run install-skill` copies the Skill directory to `~/.claude/skills/`
+  (Claude Code), `~/.agents/skills/` (Codex, Gemini CLI, Grok Build), `~/.vibe/skills/`,
+  `~/.qwen/skills/`, plus a short Cursor command that points at the shared copy.
+
+### Changed
+
+- **One surface instead of two.** The `/ai-prompting:improve` command duplicated the Skill as a
+  second entry. `SKILL.md` now reads its own flags; `.claude/commands/improve.md` is removed, and the
+  installer deletes the old `~/.claude/commands/ai-prompting:improve.md` when installing the Claude
+  Code skill. `npm run install-command` remains as an alias until 0.5.0.
+- **The "think step by step" rule is a criterion, not a model list:** strip it when the target has a
+  reasoning / effort control — every current hosted model and most open-weight ones people run
+  locally (Qwen3.8, gpt-oss, Gemma 4, Muse Glimmer, Mistral Small 4). "Local" no longer implies "keep
+  CoT"; non-reasoning instruct checkpoints do.
+- **No shipped template asks for the model's reasoning.** Patterns #5 ("step trace") and #9
+  (`<analysis>`) did; Claude Fable/Opus/Sonnet 5.x can refuse such a request, billed. A test now
+  forbids reasoning sections in every template.
+- **Rubric (intent clarity):** the opener signals read the request — `<objective>`, else `<task>` —
+  not the markup. Wrapping a request in tags no longer hides a vague opener, and dropping a duplicate
+  objective does not cost the imperative credit.
+- **`SKILL.md`:** states that the user's instructions take precedence over it; produces the rewrite
+  with assumptions by default and asks only when blocked; skips the step-9 choice block whenever the
+  request implies output only.
+- **`agents/openai.yaml`** follows the documented Codex schema (`interface`, `policy`). The invented
+  keys and the `version: 0.1.0` field that had drifted from `package.json` are gone.
+- **`~/.codex/commands` is no longer a target.** It is not a documented Codex location, so the old
+  install there did nothing.
+
 ## [0.3.2] — 2026-10-23
 
 ### Changed

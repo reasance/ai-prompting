@@ -7,6 +7,8 @@ description: improve, rewrite, debug, evaluate, or compress prompts for llm agen
 
 A prompt-improvement Skill. Take any user-supplied prompt and return a clearer, cheaper, more reliable version — calibrated to the target agent, task type, and output needs.
 
+The user's instructions take precedence over this Skill.
+
 ## When to use
 
 Use this Skill when the user asks any of the following (in any language):
@@ -22,15 +24,15 @@ Do **not** invoke this Skill when the user simply wants you to *answer* a questi
 
 1. **Read** the user's original prompt verbatim.
 2. **Classify** the task type (research / writing / correspondence / coding / analysis / data-extraction / agentic-workflow / creative / business / education / general).
-3. **Detect** target agent or model if mentioned (Claude / GPT / Gemini / local / coding-agent / research-agent / tool-agent).
+3. **Detect** the target if mentioned: a model or vendor (Claude, GPT, Gemini, Grok, Muse, Mistral, DeepSeek, Qwen, Kimi, GLM, MiniMax, a local model) or an agent role (coding / research / tool agent). Resolve it as described in [agent-compatibility](references/agent-compatibility.md#resolving-a-target).
 4. **Identify missing information** that would *materially* change the result.
-5. **Decide on clarification:**
+5. **Decide on clarification.** Default: produce the rewrite with `[ASSUMPTION: ...]` markers; ask only when the policy below says the result would otherwise be wrong.
    - Critical missing info → ask up to 3 focused questions (see [clarification-policy](references/clarification-policy.md)). When the host has a structured-choice primitive (e.g. `AskUserQuestion` in Claude Code), prefer it over markdown MCQ — see [rendering rules](references/clarification-policy.md#rendering).
    - Otherwise → proceed and surface explicit `[ASSUMPTION: ...]` markers.
 6. **Rewrite** using the smallest effective structure (see [prompt-patterns](references/prompt-patterns.md)).
 7. **Score structural coverage** of original vs improved against the rubric (see [prompt-quality-rubric](references/prompt-quality-rubric.md)). It measures whether the prompt *declares* role/objective/constraints/format/criteria — not whether it asks for the right thing. Never present it as a quality or performance claim, and never report a confidence level.
 8. **Return** the result in the requested output mode.
-9. **Offer execution.** After the output block, append a 2-choice prompt asking what to do next. Skip in `final_only` (raw output for piping); show in `compact` / `standard` / `diagnostic`. Skip entirely when invoked from the deterministic CLI (no agent to interpret the reply).
+9. **Offer execution.** After the output block, append a 2-choice prompt asking what to do next. Show it in `compact` / `standard` / `diagnostic`. Skip it when the request implies output only — `final_only`, "just the prompt", piped or CI use, a single-shot host with no follow-up turn — and when invoked from the deterministic CLI (no agent to interpret the reply).
 
    **Italian template:**
 
@@ -66,7 +68,7 @@ definition: adapters translate their own syntax into it and do not redefine sema
 | `mode` | `--mode` | `final_only` · `compact` · `standard` · `diagnostic` | `standard` | How much of the report to return — see below. |
 | `language` | `--language` | `it` · `en` | auto-detect | Output language; overrides the it-vs-en evidence scorer. |
 | `taskType` | `--task` | research · writing · correspondence · coding · analysis · data-extraction · agentic-workflow · creative · business · education · general | inferred | Overrides the keyword classifier. |
-| `targetAgent` | `--target` | claude · openai · gemini · local · coding-agent · research-agent · tool-agent | none | Activates an adapter — see [agent-compatibility](references/agent-compatibility.md). |
+| `targetAgent` | `--target` | a model or vendor name (`claude`, `opus-5.5`, `gpt-6`, `gemini-4`, `grok`, `qwen3.8-27b`, `local`, …) · `coding-agent` · `research-agent` · `tool-agent` | none | Resolves to a row of the capability matrix — see [agent-compatibility](references/agent-compatibility.md#resolving-a-target). |
 | `audience` | `--audience` | free text | none | Injected into `<context>` as `Audience: …`; suppresses the audience question. |
 | `tokenBudget` | `--token-budget` | `minimal` · `balanced` · `generous` | `balanced` | Size of the *generated* prompt — see [cost-control](references/cost-control.md). |
 | `clarify` | `--clarify` | `auto` · `always` · `never` | `auto` | Question policy — see [clarification-policy](references/clarification-policy.md#policy-overrides). |
@@ -81,6 +83,10 @@ pretending; see [agent-compatibility](references/agent-compatibility.md).
 - `compact` — improved prompt + 1-line "what changed" + score totals.
 - `standard` — improved prompt + change list + score + assumptions.
 - `diagnostic` — standard + per-category rubric breakdown with the reason for each score.
+
+**Invoked with arguments** (a slash command such as `/ai-prompting --mode compact <prompt>`): flags
+may appear anywhere; strip them and map each to the row above. Everything else is the prompt to
+improve. If only flags were given, ask for the prompt.
 
 **Reading options out of prose.** Users state these in natural language more often than as flags.
 An explicit flag always wins; otherwise infer: "solo prompt" / "just the prompt" / "no explanation"
@@ -133,7 +139,7 @@ Otherwise: proceed with explicit assumptions. Max 3 questions, prefer multiple-c
 - Do not load the references files unless the user is in `diagnostic` mode or asks for a deeper rewrite.
 - Avoid restating the user's full prompt unless the rewrite changes substantively.
 - Strip detected padding ("you are a world-class…", "take a deep breath", "I will tip you…") before scaffolding.
-- Avoid explicit "think step by step" instructions for modern reasoning models — they reason adaptively.
+- Strip "think step by step" when the target has a reasoning / effort control — every current hosted model and most open-weight ones. Never add a section asking for the reasoning itself (`<thinking>`, `<analysis>`, a trace): some models refuse it. Keep a CoT line only for non-reasoning instruct checkpoints. Criterion: [cost-control](references/cost-control.md#when-to-skip-think-step-by-step).
 - Honor `tokenBudget` (`minimal` / `balanced` / `generous`): drop `<context>` and `<quality_bar>` first under `minimal`. Full guidance: [cost-control](references/cost-control.md).
 
 ## Generated prompt structure
@@ -154,16 +160,20 @@ For simple tasks use a 2-3 line plain prompt — do not force XML when it adds n
 
 ## Agent-specific adapters
 
-When a target is specified, adjust:
-- **Claude:** XML scaffold; place long documents at the top; instructions at the end; avoid manual chain-of-thought; rely on adaptive thinking.
-- **GPT-5.x:** prefer CTCO (Context-Task-Constraints-Output); strip persona padding; favor strict output formats (JSON schemas) for evaluability.
-- **Gemini:** multimodal-aware; explicit format expected; temperature is provider-managed in newer revisions.
-- **Local LLMs:** shorter prompts, more explicit constraints, simpler structure, prefer plain markdown over XML.
-- **Coding agents:** declare file boundaries, acceptance criteria, tests, edit constraints.
-- **Research agents:** require citations, source diversity, recency checks, explicit uncertainty.
-- **Tool agents:** declare when to use tools, when not to, how to recover from errors.
+Adapters are keyed on behavior, not vendor names. When a target is named, look up its row in the
+[capability matrix](references/agent-compatibility.md#capability-matrix) and apply the criteria:
 
-Full table: [agent-compatibility](references/agent-compatibility.md).
+- **Reasoning control** → no CoT text, no reasoning sections; point the user at the effort / thinking parameter.
+- **Sampling policy** → no temperature advice unless the vendor asks for specific values.
+- **Structured output** → schema mode where strict; "json" + an example object where `json_object` only.
+- **Prefill** → never suggest it where rejected; use structured output or a plain instruction.
+- **Tools** → only the tools needed; parallel only where supported; replay reasoning where required.
+- **Defaults to counter** → state length and format when the model runs long, terse, or over-formatted.
+
+Vendor specifics (Claude's refusal on reasoning requests, GPT-6 Astra's sensitivity to skill text,
+Gemini's preference for direct prompts, …) and the coding / research / tool-agent role adapters are
+in [agent-compatibility](references/agent-compatibility.md). For a model not in the matrix, apply the
+criteria from its model card.
 
 ## Local CLI utility (optional companion)
 

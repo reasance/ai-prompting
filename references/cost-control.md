@@ -43,12 +43,24 @@ Modern reasoning models treat persona padding as noise. Do not add it during sca
 
 ## When to skip "think step by step"
 
-Modern frontier models (Claude Opus 4.5+, GPT-5.x, Gemini 2.5+) reason adaptively. Explicit "think step by step" is:
-- Redundant when the model is in adaptive/extended thinking mode.
-- Sometimes counterproductive (forces a verbal trace that pollutes the output).
-- Useful only when targeting *small/local* models that don't reason internally.
+_Verified 2026-10-23 against: the vendor sources in [agent-compatibility](agent-compatibility.md#vendor-notes)._
 
-If the target model is a small open-weights model: keep the CoT instruction. Otherwise: remove it.
+The criterion is the target's **reasoning control**, not its size or where it runs. If the model
+exposes an effort / thinking parameter or a thinking mode, an explicit "think step by step" is:
+- Redundant: the model already reasons internally, and the parameter sets the depth more reliably
+  than prose does.
+- Sometimes counterproductive: it invites a verbal trace that pollutes the output — and on some
+  models (Claude Fable/Opus/Sonnet 5.x) a request to write the reasoning out is refused.
+
+As of the verification date that covers every current hosted model and the open-weight models
+people run locally (Qwen3.8, gpt-oss, Gemma 4, Muse Glimmer, Mistral Small 4). Remove the
+instruction and point the user at the parameter instead (Claude `effort`, OpenAI
+`reasoning.effort`, Gemini `thinking_level`, `reasoning_effort` elsewhere — see the
+[capability matrix](agent-compatibility.md#capability-matrix)).
+
+Keep a CoT line only for a non-reasoning instruct checkpoint (Llama 3.x / 4, Mistral Small 3.x and
+older) or when the user has turned thinking off. Gemini tolerates a short "Think very hard before
+answering" on hard tasks; that is a nudge, not a requested trace.
 
 ## Reuse vs one-shot
 

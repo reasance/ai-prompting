@@ -22,8 +22,7 @@ Requires Node.js ≥ 18. The only devDeps are `typescript` and `@types/node`.
 
 ```
 ai-prompting/
-├── SKILL.md                       # Skill entrypoint (Anthropic format)
-├── .claude/commands/improve.md    # Slash command (Agent Skills standard)
+├── SKILL.md                       # Skill entrypoint (Agent Skills standard); also reads its own flags
 ├── src/
 │   ├── types.ts                   # Public type surface
 │   ├── evaluator.ts               # 9-category, 100-point heuristic rubric
@@ -38,8 +37,9 @@ ai-prompting/
 │   ├── cost-control.md
 │   └── agent-compatibility.md
 ├── tests/                         # node:test
-├── scripts/install-command.js     # Cross-host slash-command installer
-├── agents/openai.yaml             # OpenAI Apps SDK manifest
+├── scripts/install-skill.js       # Installs the Skill directory per host
+├── scripts/check-verified.js      # Warns on model notes verified > 90 days ago
+├── agents/openai.yaml             # Codex / ChatGPT skill UI metadata
 └── examples/                      # Reference inputs
 ```
 
@@ -48,27 +48,22 @@ ai-prompting/
 ### Adding a new option
 
 `SKILL.md` § **Options** is the canonical definition of every option — its flag, values, default,
-and effect. The slash command and the CLI are adapters that map their own syntax onto it; neither
-redefines semantics.
+and effect. Hosts invoke the Skill directly and it maps flags onto that table itself; the CLI is
+the only adapter.
 
 1. Add the row to the Options table in `SKILL.md`.
-2. Add the `flag → option` row to the table in `.claude/commands/improve.md`. Nothing else — no
-   values, no prose. `tests/skill-md.test.ts` fails if the two tables disagree in either direction.
-3. If the CLI implements it too, add it to the `VALID_*` unions and `buildOptions()` in
+2. If the CLI implements it too, add it to the `VALID_*` unions and `buildOptions()` in
    `src/cli.ts`, and to `PromptImproverOptions` in `src/types.ts`.
-4. Put the deep semantics in the relevant `references/*.md` file and link to the anchor from the
-   Options table.
-
-**Do not** copy procedure into `.claude/commands/improve.md`. It is an adapter: `$ARGUMENTS`
-handling, the flag mapping, and the resolution ladder to `SKILL.md`. The decision flow, output
-templates, padding list, scaffold, and choice block live in `SKILL.md` only, and the test suite
-enforces their absence from the adapter.
+3. Put the deep semantics in the relevant `references/*.md` file and link to the anchor from the
+   Options table. `tests/skill-md.test.ts` fails on a link to an anchor that does not exist.
 
 ### Adding a new task type
 
 1. Add a regex pattern set to `TASK_TYPE_HINTS` in `src/prompt-improver.ts`.
-2. Add `it` and `en` strings to `ROLE_BY_TASK` and `OUTPUT_FORMAT_BY_TASK`.
-3. Document the scaffold in `references/prompt-patterns.md`.
+2. Add `it` and `en` strings to `ROLE_BY_TASK` and `OUTPUT_FORMAT_BY_TASK`, and map the type to a
+   default group in `CONSTRAINT_GROUP` (that picks its default constraints and quality bar).
+3. Document the scaffold in `references/prompt-patterns.md`, and the type in the `taskType` row of
+   SKILL.md's Options table, `VALID_TASKS` in `src/cli.ts`, and README's flag table.
 4. Add a regression test in `tests/prompt-improver.test.ts`:
    ```ts
    test('inferTaskType: <new keywords> route to <new-type>', () => {
@@ -76,10 +71,18 @@ enforces their absence from the adapter.
    });
    ```
 
-### Adding a new agent target
+### Adding or updating a target model
 
-1. Append a section to `references/agent-compatibility.md` with the host's quirks.
-2. If the adapter changes the scaffold structurally (rare), add a small branch in `prompt-improver.ts::buildScaffold` keyed on `opts.targetAgent`. Keep the branch ≤ 10 lines; push prose into the reference.
+Adapters are keyed on behavior, not vendor. A new model usually needs no new prose:
+
+1. Add or update its vendor's row in the **Capability matrix** of `references/agent-compatibility.md`
+   — reasoning control and default, sampling policy, structured output, prefill, tools, reasoning
+   replay. Write "—" where the vendor's docs say nothing; never fill a cell from memory.
+2. Put only what the matrix cannot hold in that vendor's note under **Vendor notes**.
+3. Every vendor note and host section starts with `_Verified YYYY-MM-DD against: <official sources>_`.
+   Bump the date whenever you re-check a section. The test suite fails on a vendor note without a
+   stamp; `npm run check-verified` warns on stamps older than 90 days, CI prints the warning, and a
+   monthly workflow opens a reminder issue.
 
 **The CLI has no `--target` flag on purpose.** It used to, and it did nothing —
 `--target local` and `--target claude` produced byte-identical output while the
@@ -88,15 +91,15 @@ only together with a branch that actually fires and a test that proves it, of th
 form "output for target A differs from target B in this specific way". A test
 asserting the flag reaches the options object is not that test — that is exactly
 the coverage `--target` and `--clarify` both had while being broken.
-3. If the host has its own slash-command directory, add ~5 lines to `scripts/install-command.js`:
-   ```js
-   {
-     label: 'New Host',
-     dir: path.join(os.homedir(), '.newhost', 'commands'),
-     filename: 'ai-prompting:improve.md',
-   }
-   ```
-4. Verify with `npm run install-command -- --list` and `npm run install-command -- --dry-run --host newhost`.
+
+### Adding a new skill host
+
+1. Add a row to the **Skill-based hosts** table in `references/agent-compatibility.md`, with the
+   documented skills directory and a source in the section's Verified line.
+2. If the host does not read `~/.agents/skills/`, add an entry to `HOSTS` in
+   `scripts/install-skill.js` (`id`, `label`, `kind: 'skill'`, `root`, `dir`, `serves`).
+3. Verify with `npm run install-skill -- --list` and, against a throwaway home,
+   `HOME=$(mktemp -d) npm run install-skill -- --dry-run --host <id>`.
 
 ### Adding a new padding pattern
 

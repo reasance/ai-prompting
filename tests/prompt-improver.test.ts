@@ -534,3 +534,9 @@ test('inferTaskType: a prompt that hands over tools is agentic, not research', (
   assert.equal(inferTaskType('Research the impact of context length on accuracy.'), 'research');
   assert.equal(inferTaskType('Write an email to the team about the outage.'), 'correspondence');
 });
+
+test('inferTaskType: padding does not decide the task type', () => {
+  // "world-class" contains the coding keyword `class`.
+  const r = improvePrompt({ originalPrompt: 'You are a world-class expert. Take a deep breath. Help me write something good.' });
+  assert.notEqual(r.taskType, 'coding');
+});

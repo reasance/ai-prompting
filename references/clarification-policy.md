@@ -49,12 +49,15 @@ constrains the reply to the offered values — prefer it.** Detection rule
 for the agent: if a tool whose purpose is "ask the user a question with
 choices" is available, call it; otherwise emit the markdown block below.
 
+_Verified 2026-10-23 against: code.claude.com/docs/en/skills, learn.chatgpt.com/docs/developer-commands, geminicli.com/docs, docs.mistral.ai/vibe/code/cli/skills, docs.x.ai/build/features/skills-plugins-marketplaces._
+
 | Host | Primitive | Notes |
 |---|---|---|
-| Claude Code | `AskUserQuestion` tool | Renders as inline chips; reply is structured; supports up to 4 questions per call. |
+| Claude Code | `AskUserQuestion` tool | Renders as inline chips; reply is structured; up to 4 questions per call. |
 | Cursor | inline choice widget | Similar UX; structured reply. |
-| OpenAI Codex CLI | none (as of 2026) | Falls back to the markdown format. |
-| Gemini CLI | none (as of 2026) | Falls back to the markdown format. |
+| OpenAI Codex CLI / IDE | none documented | A multiple-choice tool exists in Plan mode per an open GitHub issue, not in the docs — fall back to markdown. |
+| Gemini CLI | none documented | Falls back to the markdown format. |
+| Mistral Vibe · Grok Build · Qwen Code | none documented | Falls back to the markdown format. |
 | Plain chat / agnostic | none | Markdown only. |
 
 Why prefer it: lower friction for the user (one click vs typing "1B"),
