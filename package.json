@@ -14,13 +14,13 @@
   ],
   "license": "MIT",
   "author": "matteoscurati",
-  "homepage": "https://github.com/matteoscurati/ai-prompting#readme",
+  "homepage": "https://github.com/reasance/ai-prompting#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/matteoscurati/ai-prompting.git"
+    "url": "git+https://github.com/reasance/ai-prompting.git"
   },
   "bugs": {
-    "url": "https://github.com/matteoscurati/ai-prompting/issues"
+    "url": "https://github.com/reasance/ai-prompting/issues"
   },
   "type": "commonjs",
   "main": "dist/src/index.js",

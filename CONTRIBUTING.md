@@ -8,7 +8,7 @@ Thanks for considering a contribution. This project is small, opinionated, and e
 ## Dev setup
 
 ```bash
-git clone https://github.com/matteoscurati/ai-prompting.git
+git clone https://github.com/reasance/ai-prompting.git
 cd ai-prompting
 npm install
 npm run build

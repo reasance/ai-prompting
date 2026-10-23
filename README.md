@@ -6,7 +6,7 @@
 [![license](https://img.shields.io/npm/l/ai-prompting.svg)](LICENSE)
 [![node](https://img.shields.io/node/v/ai-prompting.svg)](https://nodejs.org)
 [![types](https://img.shields.io/npm/types/ai-prompting.svg)](https://www.npmjs.com/package/ai-prompting)
-[![CI](https://github.com/matteoscurati/ai-prompting/actions/workflows/ci.yml/badge.svg)](https://github.com/matteoscurati/ai-prompting/actions/workflows/ci.yml)
+[![CI](https://github.com/reasance/ai-prompting/actions/workflows/ci.yml/badge.svg)](https://github.com/reasance/ai-prompting/actions/workflows/ci.yml)
 
 `ai-prompting` ships in two layers — an Anthropic-style **Skill** that any compatible agent can apply semantically, and a **deterministic Node.js CLI** that runs without API keys, without LLM calls, and without runtime dependencies. The CLI is the verifiable baseline. The Skill is where the real semantic gains happen.
 
@@ -117,7 +117,7 @@ npm install -g ai-prompting
 From source:
 
 ```bash
-git clone https://github.com/matteoscurati/ai-prompting.git
+git clone https://github.com/reasance/ai-prompting.git
 cd ai-prompting
 npm install
 npm run build
@@ -343,7 +343,7 @@ If a check fails, the doctor prints a `fix:` line for it.
 
 **Why is there no `--target` on the CLI?** Because it changed nothing. `--target local` and `--target claude` produced byte-identical output. `targetAgent` remains a Skill and library option, where an agent can genuinely adapt the rewrite; the deterministic CLI will get the flag back when it has real adapter branches and tests that prove they fire.
 
-**Where do I report issues?** [GitHub Issues](https://github.com/matteoscurati/ai-prompting/issues). Security: see [SECURITY.md](SECURITY.md).
+**Where do I report issues?** [GitHub Issues](https://github.com/reasance/ai-prompting/issues). Security: see [SECURITY.md](SECURITY.md).
 
 ## Limitations
 

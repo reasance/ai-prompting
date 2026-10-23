@@ -16,7 +16,7 @@ The `ai-prompting` package is in active development. Security fixes are applied 
 If you discover a security issue, please report it privately:
 
 - **Email:** matteo.scurati@gmail.com
-- **GitHub Security Advisories:** [github.com/matteoscurati/ai-prompting/security/advisories/new](https://github.com/matteoscurati/ai-prompting/security/advisories/new)
+- **GitHub Security Advisories:** [github.com/reasance/ai-prompting/security/advisories/new](https://github.com/reasance/ai-prompting/security/advisories/new)
 
 Include in your report:
 

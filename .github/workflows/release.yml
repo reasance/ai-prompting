@@ -6,7 +6,7 @@ name: Release
 # secret. One-time setup on npmjs.com:
 #   npmjs.com/package/ai-prompting -> Settings -> Trusted Publisher
 #     Publisher:          GitHub Actions
-#     Organization/user:  matteoscurati
+#     Organization/user:  reasance
 #     Repository:         ai-prompting
 #     Workflow filename:  release.yml     (exact, case-sensitive, with .yml)
 #     Environment:        (leave empty)
