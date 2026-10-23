@@ -39,6 +39,12 @@ What the user wants must be unambiguous.
 | 10–13 | Clear imperative + concrete object; minor ambiguity. |
 | 14–15 | Explicit `<objective>` or one-sentence outcome statement; no rephrasing needed. |
 
+The opener signals (vague opener, concrete imperative) are read from the request itself — the
+`<objective>` if present, else the `<task>`, else the raw text — never from the markup around it.
+Wrapping a request in tags therefore neither earns the imperative credit nor hides a vague opener.
+A one-sentence prompt is scaffolded as `<task>` alone: an `<objective>` repeating the same sentence
+adds tokens, not intent.
+
 ## 2. Context sufficiency (15)
 
 The prompt should carry the context that materially changes the output — and not more.

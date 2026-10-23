@@ -1,6 +1,7 @@
 export type TaskType =
   | 'research'
   | 'writing'
+  | 'correspondence'
   | 'coding'
   | 'analysis'
   | 'data-extraction'

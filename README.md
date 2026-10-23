@@ -54,7 +54,7 @@ You give it a vague, padded, or unstructured prompt. It returns a clearer, cheap
 
 Concretely, on every prompt it:
 
-1. **Detects** language (it/en) and task type (research, coding, writing, analysis, data-extraction, agentic-workflow, creative, business, education, general).
+1. **Detects** language (it/en) and task type (research, coding, writing, correspondence, analysis, data-extraction, agentic-workflow, creative, business, education, general).
 2. **Strips** padding that hurts modern reasoning models — `"you are a world-class…"`, `"take a deep breath"`, `"think step by step"`, `"I will tip you…"` plus Italian variants (`"sei un esperto di livello mondiale"`, `"fai un respiro profondo"`, `"pensaci passo passo"`).
 3. **Decides whether to ask** for clarification (only when info is critical, contradictions exist, or the domain is high-risk: legal, medical, financial, security, production code).
 4. **Rewrites** with a canonical XML scaffold (`<role>`, `<objective>`, `<context>`, `<task>`, `<constraints>`, `<output_format>`, `<quality_bar>`).
@@ -142,7 +142,7 @@ ai-prompting --help
 | `--prompt <text>` | inline string | — | exclusive with `--file`/stdin |
 | `--file <path>` | filesystem path | — | UTF-8 |
 | `--mode <name>` | `final_only` / `compact` / `standard` / `diagnostic` | `standard` | see [Output modes](#output-modes) |
-| `--task <type>` | research / writing / coding / analysis / data-extraction / agentic-workflow / creative / business / education / general | inferred | overrides the keyword classifier |
+| `--task <type>` | research / writing / correspondence / coding / analysis / data-extraction / agentic-workflow / creative / business / education / general | inferred | overrides the keyword classifier |
 | `--token-budget <level>` | `minimal` / `balanced` / `generous` | `balanced` | `minimal` drops `<quality_bar>`, plus `<context>` when it is not load-bearing; `generous` expands the quality bar |
 | `--clarify <policy>` | `auto` / `always` / `never` | `auto` | `never` suppresses the questions but still emits a high-risk warning |
 | `--language <code>` | `it` / `en` | auto-detect | overrides the it-vs-en evidence scorer |

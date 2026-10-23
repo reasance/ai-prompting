@@ -221,11 +221,17 @@ function scoreIntentClarity(f: Features): RubricCategoryScore {
     return { id: 'intent_clarity', label: 'Intent clarity', max, score: 0, rationale: 'Empty prompt.' };
   }
 
-  if (VAGUE_OPENERS.some((re) => re.test(trimmed))) {
+  // Judge the opening of what the prompt asks for, not of its markup. A scaffold
+  // starts with <role>, so checking the raw text never saw the request: the
+  // imperative bonus went only to prose, and a vague request wrapped in tags
+  // escaped the vague-opener penalty.
+  const lead = sectionContent(f.text, 'objective') || sectionContent(f.text, 'task') || trimmed;
+
+  if (VAGUE_OPENERS.some((re) => re.test(lead))) {
     score -= 5;
     reasons.push('Vague opener detected.');
   }
-  if (/^\s*[A-ZÀ-Ý][a-zà-ÿ]+/.test(trimmed) && !/^\s*(please|can|could|would)/i.test(trimmed)) {
+  if (/^\s*[A-ZÀ-Ý][a-zà-ÿ]+/.test(lead) && !/^\s*(please|can|could|would)/i.test(lead)) {
     score += 3;
     reasons.push('Starts with concrete imperative or topic.');
   }
@@ -504,11 +510,21 @@ export function categoryById(score: RubricScore, id: RubricCategoryId): RubricCa
 }
 
 export function detectPaddingPhrases(text: string): Array<{ phrase: string; label: string }> {
-  const out: Array<{ phrase: string; label: string }> = [];
+  return detectPaddingSpans(text).map(({ start, end, label }) => ({ phrase: text.slice(start, end).trim(), label }));
+}
+
+/**
+ * Padding matches as offsets into `text`. Patterns overlap — "Take a deep
+ * breath and you are a world-class engineer — think step by step." matches three
+ * of them — so callers that remove padding must merge these ranges; deleting the
+ * phrases one at a time leaves fragments once the first removal eats the second.
+ */
+export function detectPaddingSpans(text: string): Array<{ start: number; end: number; label: string }> {
+  const out: Array<{ start: number; end: number; label: string }> = [];
   for (const p of PADDING_PATTERNS) {
-    const matches = text.match(p.re);
-    if (!matches) continue;
-    for (const m of matches) out.push({ phrase: m.trim(), label: p.label });
+    for (const m of text.matchAll(p.re)) {
+      out.push({ start: m.index ?? 0, end: (m.index ?? 0) + m[0].length, label: p.label });
+    }
   }
   return out;
 }

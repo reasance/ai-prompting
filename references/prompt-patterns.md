@@ -2,6 +2,13 @@
 
 Use the smallest structure that solves the problem. Force XML only when the prompt mixes instructions, examples, multiple documents, or tool definitions.
 
+> **Never ask the model to write out its reasoning.** No `<thinking>`, `<analysis>` or
+> `<reasoning>` section, no "step trace", no `reasoning` field in a JSON schema. Current reasoning
+> models think internally, and some refuse a request to expose it (Claude Fable/Opus/Sonnet 5.x
+> return a billed `reasoning_extraction` refusal). Ask for what you actually need instead:
+> evidence, quotes, a one-to-two sentence justification, or a summary of actions taken. Control
+> depth with the API's effort/thinking parameter, not with prose.
+
 ## 1. Canonical XML scaffold (default for complex prompts)
 
 ```
@@ -95,7 +102,7 @@ Codice in code block con linguaggio. Prima del codice 2-4 righe di spiegazione d
 ## 5. Agentic workflow / tool use
 
 ```
-<role>Agentic workflow designer.</role>
+<role>Tool-using agent for {domain}.</role>
 <objective>{task that requires multiple tool calls}</objective>
 <tools>
 - {tool_a}: {when to use, when NOT to use}
@@ -109,11 +116,12 @@ Codice in code block con linguaggio. Prima del codice 2-4 righe di spiegazione d
 </process>
 <constraints>
 - Mai chiamare tool con parametri inventati.
-- Tool calls indipendenti vanno in parallelo.
+- Tool calls indipendenti in parallelo, se il modello target lo supporta.
+- Dichiara solo i tool che servono al task.
 - Stop quando l'output soddisfa <quality_bar>.
 </constraints>
 <output_format>
-Step trace + final answer.
+Risultato finale, poi un registro breve delle azioni (tool → esito, una riga ciascuna) e i punti irrisolti.
 </output_format>
 ```
 
@@ -149,7 +157,7 @@ Step trace + final answer.
 4. Aspetta conferma.
 5. Draft.
 </process>
-<output_format>Prosa fluida, paragrafi 60-90 parole, niente bullet a meno di liste vere.</output_format>
+<output_format>Prosa fluida, paragrafi 60-90 parole; usa elenchi solo per item realmente discreti.</output_format>
 ```
 
 ## 8. Analysis / review
@@ -181,11 +189,45 @@ Place documents *first*, instructions *last* — Anthropic recommends queries at
 
 <task>
 1. Estrai in <quotes> i passaggi rilevanti per {{question}} con riferimento a document index.
-2. In <analysis>, ragiona solo a partire dalle quotes.
-3. In <answer>, rispondi in massimo {{N}} parole.
+2. In <answer>, rispondi in massimo {{N}} parole basandoti solo sulle quotes, citando il document index; se serve, 1-2 frasi di giustificazione.
 Se le quotes sono insufficienti, dichiaralo invece di estrapolare.
 </task>
 ```
+
+## 10. Correspondence (email, letter, reply)
+
+```
+<role>Redattore di corrispondenza professionale.</role>
+<context>
+- Destinatario e relazione: {cliente, collega, fornitore}
+- Fatti: {cosa è successo, cosa si può offrire}
+</context>
+<task>Scrivi {tipo di messaggio} a {destinatario} su {tema}.</task>
+<constraints>
+- Dettagli specifici sconosciuti tra [parentesi quadre], mai inventati.
+</constraints>
+<output_format>Oggetto; saluto; 2-4 paragrafi brevi; prossimo passo o rimedio concreto; chiusura.</output_format>
+```
+
+## Defaults the CLI fills in
+
+When the prompt is silent, the deterministic CLI adds defaults keyed on the task type — never on
+a model. A default is skipped when the task already says it, and a length, count or format the user
+stated (`200-word summary`, `3 bullet`, an `Output:` line) always replaces the task-type
+`<output_format>`.
+
+| Task type | Default `<constraints>` | Default `<quality_bar>` |
+|---|---|---|
+| research · analysis · business · education | distinguish facts / inferences / assumptions; declare missing info | every non-trivial claim has evidence or a source |
+| coding | preserve public interfaces; no new dependencies | builds cleanly, affected tests pass |
+| writing · correspondence · creative | unknown specifics in `[brackets]`, never invented | length, tone and audience match the request |
+| data-extraction | missing fields are `null`, never inferred | valid JSON against the schema, values traceable to the source |
+| agentic-workflow | on tool error retry once, then fall back or report | every step has an observable stop criterion |
+| general | declare missing info | — |
+
+Every row also gets "conformance to the constraints above" (when there are any) and either "matches
+the declared format" or, when the user stated one, "respects every length, count and format stated
+in the task".
 
 ## When to choose which
 
@@ -196,5 +238,6 @@ Se le quotes sono insufficienti, dichiaralo invece di estrapolare.
 | Multiple source documents | Long-context (#9) |
 | Tool-heavy multi-step | Agentic (#5) |
 | Strict structured output | Data extraction (#6) |
+| Email, letter, reply | Correspondence (#10) |
 
 When in doubt: start compact, add structure only on observed failure.

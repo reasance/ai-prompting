@@ -21,7 +21,7 @@ Do **not** invoke this Skill when the user simply wants you to *answer* a questi
 ## Decision flow
 
 1. **Read** the user's original prompt verbatim.
-2. **Classify** the task type (research / writing / coding / analysis / data-extraction / agentic-workflow / creative / business / education / general).
+2. **Classify** the task type (research / writing / correspondence / coding / analysis / data-extraction / agentic-workflow / creative / business / education / general).
 3. **Detect** target agent or model if mentioned (Claude / GPT / Gemini / local / coding-agent / research-agent / tool-agent).
 4. **Identify missing information** that would *materially* change the result.
 5. **Decide on clarification:**
@@ -65,7 +65,7 @@ definition: adapters translate their own syntax into it and do not redefine sema
 |---|---|---|---|---|
 | `mode` | `--mode` | `final_only` · `compact` · `standard` · `diagnostic` | `standard` | How much of the report to return — see below. |
 | `language` | `--language` | `it` · `en` | auto-detect | Output language; overrides the it-vs-en evidence scorer. |
-| `taskType` | `--task` | research · writing · coding · analysis · data-extraction · agentic-workflow · creative · business · education · general | inferred | Overrides the keyword classifier. |
+| `taskType` | `--task` | research · writing · correspondence · coding · analysis · data-extraction · agentic-workflow · creative · business · education · general | inferred | Overrides the keyword classifier. |
 | `targetAgent` | `--target` | claude · openai · gemini · local · coding-agent · research-agent · tool-agent | none | Activates an adapter — see [agent-compatibility](references/agent-compatibility.md). |
 | `audience` | `--audience` | free text | none | Injected into `<context>` as `Audience: …`; suppresses the audience question. |
 | `tokenBudget` | `--token-budget` | `minimal` · `balanced` · `generous` | `balanced` | Size of the *generated* prompt — see [cost-control](references/cost-control.md). |
@@ -182,7 +182,7 @@ When the user explicitly asks for "deterministic" / "rule-based" / "no creativit
 ## References (load only when needed)
 
 - [prompt-quality-rubric.md](references/prompt-quality-rubric.md) — 9-category, 100-point scoring rubric.
-- [prompt-patterns.md](references/prompt-patterns.md) — task-specific scaffolds (research / coding / agentic / extraction / writing / analysis).
+- [prompt-patterns.md](references/prompt-patterns.md) — task-specific scaffolds (research / coding / agentic / extraction / writing / correspondence / analysis) and the defaults the CLI fills in per task type.
 - [clarification-policy.md](references/clarification-policy.md) — when to ask, how to ask.
 - [cost-control.md](references/cost-control.md) — token-budget rules per mode.
 - [agent-compatibility.md](references/agent-compatibility.md) — adapter notes per target agent.

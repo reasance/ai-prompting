@@ -1,4 +1,4 @@
-import { detectPaddingPhrases, hasAny, scorePrompt, wordCount } from './evaluator';
+import { detectPaddingSpans, hasAny, scorePrompt, wordCount } from './evaluator';
 import {
   ClarificationQuestion,
   ImprovementChange,
@@ -114,12 +114,31 @@ const RISK_KEYWORDS = [
   'gdpr',
 ];
 
+// Order matters: the first type with a matching pattern wins.
 const TASK_TYPE_HINTS: Array<{ type: TaskType; patterns: RegExp[] }> = [
   {
     type: 'coding',
     patterns: [
       /\b(code|function|bug|refactor|class|method|test|api|endpoint|sql|typescript|python|javascript|rust|go|java|c\+\+)\b/i,
       /\b(codice|funzione|metodo|classe|test|errore|debug|refactor)\b/i,
+    ],
+  },
+  {
+    // A prompt that hands the model tools is an agent prompt whatever it asks
+    // for. Checked before research: "You are an agent with web_search… find the
+    // most-cited paper" used to get a research analyst role and a research
+    // output template.
+    type: 'agentic-workflow',
+    patterns: [
+      /\b(?:you\s+are\s+an?\s+(?:\w+\s+)?agent\b|agent\s+with\b|sei\s+un\s+agente\b|tools?\s*:|strumenti\s*:|tool[- ]?use\b|tool\s+calls?\b|web_search\b|code_exec\b)/i,
+    ],
+  },
+  {
+    // Checked before research and writing: an email has a recipient and a next
+    // step, not an article's title, subtitle and 60-90 word paragraphs.
+    type: 'correspondence',
+    patterns: [
+      /\b(e-?mail|mail|reply\s+to|cover\s+letter|letter\s+to|follow-up\s+message|lettera|rispondi\s+(?:a|al|alla)|messaggio\s+(?:a|al|alla|per))\b/i,
     ],
   },
   {
@@ -137,7 +156,7 @@ const TASK_TYPE_HINTS: Array<{ type: TaskType; patterns: RegExp[] }> = [
   {
     type: 'writing',
     patterns: [
-      /\b(write|draft|email|blog|post|newsletter|copy|script|essay|story|scrivi|scriver(e|a|ò|ai)?|scrittura|articolo|saggio|mail|lettera|comunicato)\b/i,
+      /\b(write|draft|blog|post|newsletter|copy|script|essay|story|scrivi|scriver(e|a|ò|ai)?|scrittura|articolo|saggio|comunicato)\b/i,
     ],
   },
   {
@@ -183,13 +202,17 @@ const ROLE_BY_TASK: Record<TaskType, { it: string; en: string }> = {
     it: 'Senior analyst orientato a evidenze e separazione fatti/inferenze.',
     en: 'Senior analyst focused on evidence and fact/inference separation.',
   },
+  correspondence: {
+    it: 'Redattore di corrispondenza professionale: chiaro, responsabile, chiude con un prossimo passo concreto.',
+    en: 'Professional correspondence writer: clear, accountable, ends with a concrete next step.',
+  },
   'data-extraction': {
     it: 'Specialista di information extraction su schema deterministico.',
     en: 'Information-extraction specialist working against a deterministic schema.',
   },
   'agentic-workflow': {
-    it: 'Designer di workflow agentici con padronanza del tool use e della gestione errori.',
-    en: 'Agentic-workflow designer with mastery of tool use and error handling.',
+    it: 'Agente che usa strumenti: chiama un tool solo quando lo step lo richiede, gestisce gli errori, si ferma su criteri espliciti.',
+    en: 'Tool-using agent: calls a tool only when a step needs it, recovers from errors, stops on explicit criteria.',
   },
   creative: {
     it: 'Autore creativo con voce distintiva e attenzione al dettaglio.',
@@ -226,13 +249,17 @@ const OUTPUT_FORMAT_BY_TASK: Record<TaskType, { it: string; en: string }> = {
     it: 'Tesi in una frase; evidenze con riferimento puntuale; controfattuali considerati; raccomandazione finale con confidenza.',
     en: 'Thesis in one sentence; evidences with precise references; counterfactuals considered; final recommendation with confidence level.',
   },
+  correspondence: {
+    it: 'Oggetto; saluto; 2-4 paragrafi brevi; prossimo passo o rimedio concreto; chiusura. Dettagli sconosciuti come [segnaposto].',
+    en: 'Subject line; greeting; 2-4 short paragraphs; a concrete next step or remedy; sign-off. Unknown specifics as [placeholders].',
+  },
   'data-extraction': {
     it: 'Solo JSON valido conforme allo schema. Nessuna prosa. Campi mancanti = null. evidence_quote testuale, non parafrasi.',
     en: 'Valid JSON only, conforming to the schema. No prose. Missing fields = null. evidence_quote must be verbatim, not paraphrase.',
   },
   'agentic-workflow': {
-    it: 'Diagramma testuale degli step; per ogni step: input, tool da chiamare, output atteso, gestione errori, criterio di stop.',
-    en: 'Textual diagram of steps; per step: input, tool to invoke, expected output, error handling, stop criterion.',
+    it: 'Prima il risultato finale; poi un breve registro delle azioni (tool → esito, una riga ciascuna) e gli eventuali punti irrisolti.',
+    en: 'Final deliverable first; then a short log of actions taken (tool → result, one line each) and any unresolved issues.',
   },
   creative: {
     it: 'Testo creativo nella lingua e nel registro indicati; lunghezza coerente con la richiesta.',
@@ -320,14 +347,44 @@ export function parseScaffold(text: string): ParsedScaffold {
   return { sections, body: rest };
 }
 
+// A connective left hanging once the padding after it is gone: "… no ESM. Take
+// a deep breath and" or "Scrivi la mail e".
+const DANGLING_CONNECTIVE_RE = /(?:\s+(?:and|or|but|then|e|ed|o|ma|poi)|\s*[—–\-,;:])\s*$/i;
+
 function stripPadding(text: string): { cleaned: string; removed: Array<{ phrase: string; label: string }> } {
-  const found = detectPaddingPhrases(text);
-  let cleaned = text;
-  for (const { phrase } of found) {
-    cleaned = cleaned.split(phrase).join('').replace(/[ \t]+/g, ' ');
+  const spans = detectPaddingSpans(text);
+  const removed = spans.map(({ start, end, label }) => ({ phrase: text.slice(start, end).trim(), label }));
+  if (!spans.length) return { cleaned: text.replace(/\n{3,}/g, '\n\n').trim(), removed };
+
+  // Merge overlapping ranges and splice them out in one pass. Removing phrases
+  // one at a time failed whenever patterns overlapped: the first removal ate
+  // part of the second phrase, which then no longer matched and left a fragment.
+  const sorted = [...spans].sort((a, b) => a.start - b.start);
+  const merged: Array<{ start: number; end: number }> = [];
+  for (const s of sorted) {
+    const last = merged[merged.length - 1];
+    if (last && s.start <= last.end) last.end = Math.max(last.end, s.end);
+    else merged.push({ start: s.start, end: s.end });
   }
-  cleaned = cleaned.replace(/\n{3,}/g, '\n\n').trim();
-  return { cleaned, removed: found };
+
+  let out = '';
+  let cursor = 0;
+  for (const { start, end } of merged) {
+    let kept = text.slice(cursor, start);
+    const removedText = text.slice(start, end);
+    // Padding glued to the sentence before it ("Write X and think step by
+    // step.") leaves "Write X and"; drop the connective and close the sentence.
+    if (DANGLING_CONNECTIVE_RE.test(kept) && /\S/.test(kept.replace(DANGLING_CONNECTIVE_RE, ''))) {
+      kept = kept.replace(DANGLING_CONNECTIVE_RE, '');
+      if (/[.!?]\s*$/.test(removedText) && !/[.!?]\s*$/.test(kept)) kept += '.';
+    }
+    out += kept;
+    cursor = end;
+  }
+  out += text.slice(cursor);
+
+  const cleaned = out.replace(/[ \t]+/g, ' ').replace(/ +\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  return { cleaned, removed };
 }
 
 const HELP_OPENER_RE = /^\s*(aiutami\s+a\s+|help\s+me\s+(?:to\s+)?|please\s+(?:help\s+me\s+)?|puoi\s+|can\s+you\s+|could\s+you\s+|potresti\s+|fammi\s+|dammi\s+)/i;
@@ -340,27 +397,156 @@ function nominalizeImperative(s: string): string {
   return stripped.charAt(0).toUpperCase() + stripped.slice(1);
 }
 
-function extractObjective(scaffold: ParsedScaffold, lang: 'it' | 'en'): string | null {
+interface ObjectiveSource {
+  objective: string;
+  /** The body sentence the objective was read from, verbatim; null when supplied or a placeholder. */
+  sentence: string | null;
+}
+
+function splitSentences(text: string): string[] {
+  return text
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function extractObjective(scaffold: ParsedScaffold, lang: 'it' | 'en'): ObjectiveSource {
   const existing = scaffold.sections.objective || scaffold.sections.goal;
-  if (existing) return existing;
+  if (existing) return { objective: existing, sentence: null };
 
   // Read the objective out of the free-text body only. Reading it out of the
   // whole input used to splice raw markup — a user's own <constraints> block
   // ended up quoted verbatim inside <objective>.
-  const sentences = neutralizeScaffoldTags(scaffold.body)
-    .split(/(?<=[.!?])\s+/)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 8 && s.length < 280);
+  const sentences = splitSentences(neutralizeScaffoldTags(scaffold.body)).filter(
+    (s) => s.length > 8 && s.length < 280,
+  );
 
   for (const candidate of sentences) {
     if (PADDING_LIKE_SENTENCE_RE.test(candidate)) continue;
-    return HELP_OPENER_RE.test(candidate) ? nominalizeImperative(candidate) : candidate;
+    const objective = HELP_OPENER_RE.test(candidate) ? nominalizeImperative(candidate) : candidate;
+    return { objective, sentence: candidate };
   }
 
-  return lang === 'it'
-    ? '[ASSUNZIONE: dedurre l\'obiettivo dal prompt utente]'
-    : '[ASSUMPTION: infer the objective from the user prompt]';
+  return {
+    objective:
+      lang === 'it'
+        ? '[ASSUNZIONE: dedurre l\'obiettivo dal prompt utente]'
+        : '[ASSUMPTION: infer the objective from the user prompt]',
+    sentence: null,
+  };
 }
+
+const NUMBER_WORDS =
+  'one|two|three|four|five|six|seven|eight|nine|ten|twelve|fifteen|twenty|' +
+  'uno|una|due|tre|quattro|cinque|sei|sette|otto|nove|dieci|dodici|quindici|venti';
+const SPEC_UNITS =
+  'words?|parole|sentences?|frasi|bullets?|bullet\\s+points?|items?|lines?|righe|paragraphs?|paragrafi|' +
+  'questions?|domande|points?|punti|chars?|characters?|caratteri|tokens?|pages?|pagine|examples?|esempi|options?|opzioni';
+// "200-word summary", "three follow-up research questions", "max 30 parole
+// totali": a count, at most three words, a unit, then the rest of the phrase up
+// to punctuation or a conjunction.
+const QUANTITY_SPEC_RE = new RegExp(
+  `(?:\\b\\d+|\\b(?:${NUMBER_WORDS}))(?:[-\\s]+(?!(?:of|di|del|della|dei|delle)\\b)[\\p{L}-]+){0,3}?[-\\s]+(?:${SPEC_UNITS})\\b[^,.;:\\n]*?(?=\\s+(?:plus|and|with|e|ed|con|oltre)\\b|[,.;:\\n]|$)`,
+  'giu',
+);
+const OUTPUT_LINE_RE = /^(?:output|format|formato|return|restituisci)\s*:\s*\S/i;
+const OUTPUT_LABEL_RE = /^(?:output|format|formato|return|restituisci)\s*:\s*/i;
+
+/**
+ * Length, count and format requirements the user stated in the body. When any
+ * exist, the task-type default must not replace them: the research default
+ * "Summary (3-5 sentences)" used to overwrite an explicit "200-word summary plus
+ * three follow-up questions", and the quality bar then made the contradiction
+ * binding.
+ */
+export function detectOutputSpecs(body: string): string[] {
+  const specs: string[] = [];
+  for (const sentence of splitSentences(body)) {
+    if (OUTPUT_LINE_RE.test(sentence)) {
+      specs.push(sentence.replace(OUTPUT_LABEL_RE, '').replace(/[.!?]+$/, ''));
+      continue;
+    }
+    for (const m of sentence.matchAll(QUANTITY_SPEC_RE)) specs.push(m[0].trim());
+  }
+  return [...new Set(specs)];
+}
+
+type ConstraintGroup = 'evidence' | 'coding' | 'prose' | 'extraction' | 'agentic' | 'general';
+
+const CONSTRAINT_GROUP: Record<TaskType, ConstraintGroup> = {
+  research: 'evidence',
+  analysis: 'evidence',
+  business: 'evidence',
+  education: 'evidence',
+  coding: 'coding',
+  writing: 'prose',
+  correspondence: 'prose',
+  creative: 'prose',
+  'data-extraction': 'extraction',
+  'agentic-workflow': 'agentic',
+  general: 'general',
+};
+
+interface DefaultLine {
+  it: string;
+  en: string;
+  /** Skip the default when the prompt already says it. */
+  unless?: RegExp;
+}
+
+// Defaults are keyed on the task type, never on a model. "Distinguish facts,
+// inferences and assumptions" and "every claim has a source" are right for
+// research; on a customer email they pushed epistemic labels into the email,
+// and on a refactor they asked for citations.
+const DEFAULT_CONSTRAINTS: Record<ConstraintGroup, DefaultLine[]> = {
+  evidence: [
+    { it: 'Distingui esplicitamente fatti, inferenze e assunzioni.', en: 'Explicitly distinguish facts, inferences, and assumptions.' },
+    { it: 'Se mancano informazioni critiche, dichiarale invece di inventarle.', en: 'If critical information is missing, declare it rather than inventing.' },
+  ],
+  coding: [
+    {
+      it: 'Preserva le interfacce pubbliche esistenti salvo indicazione contraria.',
+      en: 'Preserve existing public interfaces unless the task says otherwise.',
+      unless: /\b(public\s+(signature|api|interface)|firma\s+pubblica|interfaccia\s+pubblica)\b/i,
+    },
+    {
+      it: 'Nessuna nuova dipendenza se non richiesta.',
+      en: 'No new dependencies unless requested.',
+      unless: /\b(dependenc|dipendenz)/i,
+    },
+  ],
+  prose: [
+    {
+      it: 'Dettagli specifici sconosciuti (nomi, date, cifre) vanno tra [parentesi quadre], mai inventati.',
+      en: 'Unknown specifics (names, dates, figures) go in [brackets]; never invent them.',
+    },
+  ],
+  extraction: [
+    {
+      it: 'Campi mancanti = null; non dedurre valori assenti dalla fonte.',
+      en: 'Missing fields are null; never infer a value that is not in the source.',
+    },
+  ],
+  agentic: [
+    {
+      it: 'In caso di errore di un tool: riprova una volta, poi ripiega o segnala.',
+      en: 'On a tool error: retry once, then fall back or report.',
+      unless: /\b(retry|riprova|attempts?|tentativ)/i,
+    },
+  ],
+  general: [
+    { it: 'Se mancano informazioni critiche, dichiarale invece di inventarle.', en: 'If critical information is missing, declare it rather than inventing.' },
+  ],
+};
+
+const DEFAULT_QUALITY_BAR: Record<ConstraintGroup, DefaultLine[]> = {
+  evidence: [{ it: 'Risposta verificabile: ogni claim non banale ha evidenza o fonte.', en: 'Answer is verifiable: every non-trivial claim has evidence or a source.' }],
+  coding: [{ it: 'Compila senza errori e i test interessati passano.', en: 'Builds cleanly and the affected tests pass.' }],
+  prose: [{ it: 'Lunghezza, tono e pubblico corrispondono alla richiesta.', en: 'Length, tone, and audience match the request.' }],
+  extraction: [{ it: 'L\'output è JSON valido rispetto allo schema; ogni valore è riconducibile alla fonte.', en: 'Output is valid JSON against the schema; every value is traceable to the source.' }],
+  agentic: [{ it: 'Ogni step ha un criterio di stop osservabile.', en: 'Every step has an observable stop criterion.' }],
+  general: [],
+};
 
 function detectContradictions(text: string): string[] {
   const out: string[] = [];
@@ -432,23 +618,18 @@ function splitBulletBlock(block: string): string[] {
     .filter(Boolean);
 }
 
-function inferConstraints(opts: PromptImproverOptions, lang: 'it' | 'en'): string[] {
+function applicableDefaults(lines: DefaultLine[], text: string, lang: 'it' | 'en'): string[] {
+  return lines.filter((l) => !l.unless || !l.unless.test(text)).map((l) => l[lang]);
+}
+
+function inferConstraints(opts: PromptImproverOptions, lang: 'it' | 'en', taskType: TaskType, text: string): string[] {
   const out: string[] = [];
   if (opts.constraints && opts.constraints.length) out.push(...opts.constraints);
   if (opts.tokenBudget === 'minimal') {
     out.push(lang === 'it' ? 'Mantieni la risposta breve; ometti contesto non essenziale.' : 'Keep the answer brief; omit non-essential context.');
   }
   if (out.length === 0) {
-    out.push(
-      lang === 'it'
-        ? 'Distingui esplicitamente fatti, inferenze e assunzioni.'
-        : 'Explicitly distinguish facts, inferences, and assumptions.',
-    );
-    out.push(
-      lang === 'it'
-        ? 'Se mancano informazioni critiche, dichiarale invece di inventarle.'
-        : 'If critical information is missing, declare it rather than inventing.',
-    );
+    out.push(...applicableDefaults(DEFAULT_CONSTRAINTS[CONSTRAINT_GROUP[taskType]], text, lang));
   }
   return out;
 }
@@ -469,9 +650,37 @@ function buildScaffold(
     changes.push({ type: 'inferred_role', detail: `Role inferred from task type "${taskType}".` });
   }
 
-  const objective = extractObjective(scaffold, lang) || safeBody;
-
   const budget = opts.tokenBudget || 'balanced';
+
+  // <objective> and <task> used to carry the same sentence verbatim. Now the
+  // objective is lifted *out* of the body: it is emitted only when the body has
+  // more to say than that one sentence. A one-sentence prompt is just a <task>.
+  const source = extractObjective(scaffold, lang);
+  let objective: string | null = null;
+  let taskBody: string;
+  if (supplied.task) {
+    // A supplied <task> wins over anything read from the body.
+    taskBody = supplied.task;
+    objective = supplied.objective || supplied.goal || (source.sentence ? source.objective : null);
+  } else if (supplied.objective || supplied.goal) {
+    objective = source.objective;
+    taskBody = safeBody;
+  } else if (source.sentence && safeBody.startsWith(source.sentence)) {
+    const rest = safeBody.slice(source.sentence.length).trim();
+    if (rest) {
+      objective = source.objective;
+      taskBody = rest;
+      changes.push({ type: 'added_section', detail: 'objective (first sentence lifted out of the task)' });
+    } else {
+      taskBody = safeBody;
+    }
+  } else {
+    taskBody = safeBody;
+  }
+  if (!taskBody) taskBody = objective || '';
+  if (!supplied.task) {
+    changes.push({ type: 'added_section', detail: 'task (wraps original prompt body)' });
+  }
 
   const existingContext = supplied.context;
   let context: string;
@@ -480,10 +689,14 @@ function buildScaffold(
   } else if (opts.audience) {
     context = `Audience: ${opts.audience}.`;
   } else {
+    // This used to say "no additional context provided", which is false
+    // whenever the body itself states facts (TS 5.4, Node 20, no ESM). A literal
+    // model can read that as permission to discount them. No literal tag name
+    // here: the scorer and the tests locate sections by their tags.
     context =
       lang === 'it'
-        ? '[ASSUNZIONE: nessun contesto aggiuntivo fornito; il modello deve segnalare ipotesi rilevanti]'
-        : '[ASSUMPTION: no additional context provided; the model should flag any load-bearing assumptions]';
+        ? '[ASSUNZIONE: nessun blocco di contesto separato; i fatti indicati nel task sono il contesto — segnala le ipotesi rilevanti]'
+        : '[ASSUMPTION: no separate context block; the facts stated in the task are the context — flag load-bearing assumptions]';
   }
   // Under `minimal` the context block only earns its tokens when it carries real
   // facts. A bare [ASSUMPTION: ...] placeholder does not, so it gets dropped.
@@ -495,49 +708,56 @@ function buildScaffold(
     changes.push({ type: 'added_section', detail: 'context' });
   }
 
-  // A supplied <task> wins; otherwise the free-text body becomes the task, with
-  // its structural tags already defanged.
-  const taskBody = supplied.task || safeBody || objective;
-  if (!supplied.task) {
-    changes.push({ type: 'added_section', detail: 'task (wraps original prompt body)' });
-  }
+  const group = CONSTRAINT_GROUP[taskType];
 
   // The user's own constraints are kept and the inferred ones appended, instead
   // of being detected, silently discarded, and replaced by generic defaults.
-  const inferred = inferConstraints(opts, lang);
+  const inferred = inferConstraints(opts, lang, taskType, taskBody);
   const constraintLines: string[] = [];
   if (supplied.constraints) {
     constraintLines.push(...splitBulletBlock(supplied.constraints));
     changes.push({ type: 'preserved_user_text', detail: 'constraints (user-supplied, kept verbatim)' });
-  } else {
-    changes.push({ type: 'added_section', detail: 'constraints' });
   }
   for (const c of inferred) {
     if (!constraintLines.some((line) => line.toLowerCase() === c.toLowerCase())) constraintLines.push(c);
   }
+  if (!supplied.constraints && constraintLines.length) {
+    changes.push({ type: 'added_section', detail: `constraints (defaults for "${taskType}")` });
+  }
   const constraintsBlock = constraintLines.map((c) => `- ${c}`).join('\n');
 
-  const outputFormat = supplied.output_format || OUTPUT_FORMAT_BY_TASK[taskType][lang];
-  if (!supplied.output_format) {
+  // A length, count or format the user stated always beats the task-type default.
+  const specs = supplied.output_format ? [] : detectOutputSpecs(taskBody);
+  let outputFormat: string;
+  if (supplied.output_format) {
+    outputFormat = supplied.output_format;
+  } else if (specs.length) {
+    outputFormat = `${lang === 'it' ? 'Come indicato nel task' : 'As stated in the task'}: ${specs.join('; ')}.`;
+    changes.push({ type: 'preserved_user_text', detail: 'output_format (user-stated spec kept; task-type default not applied)' });
+  } else {
+    outputFormat = OUTPUT_FORMAT_BY_TASK[taskType][lang];
     changes.push({ type: 'added_section', detail: 'output_format' });
   }
 
   // A user-supplied quality bar used to be detected and then thrown away.
-  const qualityBar = supplied.quality_bar
-    ? splitBulletBlock(supplied.quality_bar)
-    : lang === 'it'
-      ? [
-          'Risposta verificabile: ogni claim non banale ha evidenza o fonte.',
-          'Conformità a tutti i constraints sopra.',
-          'Output conforme allo schema/formato indicato al primo tentativo.',
-        ]
-      : [
-          'Answer is verifiable: every non-trivial claim has evidence or a source.',
-          'Conformance to all constraints above.',
-          'Output matches the declared schema/format on the first try.',
-        ];
+  let qualityBar: string[];
   if (supplied.quality_bar) {
+    qualityBar = splitBulletBlock(supplied.quality_bar);
     changes.push({ type: 'preserved_user_text', detail: 'quality_bar (user-supplied, kept verbatim)' });
+  } else {
+    qualityBar = applicableDefaults(DEFAULT_QUALITY_BAR[group], taskBody, lang);
+    if (constraintLines.length) {
+      qualityBar.push(lang === 'it' ? 'Conformità a tutti i constraints sopra.' : 'Conformance to all constraints above.');
+    }
+    qualityBar.push(
+      specs.length
+        ? lang === 'it'
+          ? 'Rispetta ogni lunghezza, quantità e formato indicati nel task.'
+          : 'Respects every length, count, and format stated in the task.'
+        : lang === 'it'
+          ? 'Output conforme allo schema/formato indicato al primo tentativo.'
+          : 'Output matches the declared schema/format on the first try.',
+    );
   }
   if (budget === 'generous') {
     qualityBar.push(
@@ -561,10 +781,13 @@ function buildScaffold(
 
   changes.push({ type: 'wrapped_xml', detail: 'Wrapped prompt in canonical XML scaffold.' });
 
-  const sections: string[] = [`<role>\n${role}\n</role>`, `<objective>\n${objective}\n</objective>`];
+  const sections: string[] = [`<role>\n${role}\n</role>`];
+  if (objective) sections.push(`<objective>\n${objective}\n</objective>`);
   if (!dropContext) sections.push(`<context>\n${context}\n</context>`);
   sections.push(`<task>\n${taskBody}\n</task>`);
-  sections.push(`<constraints>\n${constraintsBlock}\n</constraints>`);
+  // Every default can be skipped when the task already says it; an empty
+  // section is noise, so it goes.
+  if (constraintLines.length) sections.push(`<constraints>\n${constraintsBlock}\n</constraints>`);
   sections.push(`<output_format>\n${outputFormat}\n</output_format>`);
   if (!dropQualityBar) sections.push(`<quality_bar>\n${qualityBlock}\n</quality_bar>`);
 

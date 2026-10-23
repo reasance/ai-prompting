@@ -24,6 +24,7 @@ const VALID_CLARIFY: ClarificationPolicy[] = ['auto', 'always', 'never'];
 const VALID_TASKS: TaskType[] = [
   'research',
   'writing',
+  'correspondence',
   'coding',
   'analysis',
   'data-extraction',

@@ -79,3 +79,13 @@ test('scorePrompt: total never exceeds 100, never negative', () => {
     assert.ok(r.total >= 0 && r.total <= 100, `total out of range: ${r.total} for "${sample}"`);
   }
 });
+
+// The intent checks read the request, not the markup: a scaffold starts with
+// <role>, so they used to see neither the imperative nor the vagueness inside it.
+test('scorePrompt: wrapping a request in tags neither earns nor hides intent', () => {
+  const intent = (t: string) => categoryById(scorePrompt(t), 'intent_clarity')!.score;
+  const clear = 'Summarize the incident report for the on-call engineer.';
+  assert.equal(intent(`<role>\nOn-call lead.\n</role>\n\n<task>\n${clear}\n</task>`), intent(clear));
+  assert.ok(intent('<role>\nEditor.\n</role>\n\n<task>\nhelp me write something\n</task>') < intent(clear),
+    'a vague request must stay penalized inside a scaffold');
+});
