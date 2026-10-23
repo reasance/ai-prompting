@@ -1,6 +1,6 @@
 {
   "name": "ai-prompting",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Improve, rewrite, debug, evaluate, and compress prompts for any LLM agent. Ships an installable Skill plus a deterministic local CLI.",
   "keywords": [
     "prompt-engineering",
