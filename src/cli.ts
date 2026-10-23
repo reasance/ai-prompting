@@ -5,6 +5,7 @@ import { improvePrompt } from './prompt-improver';
 import { formatReport, runDoctor } from './doctor';
 import {
   ClarificationPolicy,
+  ScaffoldPolicy,
   ImprovementResult,
   OutputMode,
   PromptImproverOptions,
@@ -21,6 +22,7 @@ interface ParsedArgs {
 const VALID_MODES: OutputMode[] = ['final_only', 'compact', 'standard', 'diagnostic'];
 const VALID_BUDGETS: TokenBudget[] = ['minimal', 'balanced', 'generous'];
 const VALID_CLARIFY: ClarificationPolicy[] = ['auto', 'always', 'never'];
+const VALID_SCAFFOLD: ScaffoldPolicy[] = ['auto', 'always'];
 const VALID_TASKS: TaskType[] = [
   'research',
   'writing',
@@ -54,7 +56,7 @@ export class CliError extends Error {
 
 const BOOLEAN_FLAGS = new Set(['no-score', 'no-rationale', 'help', 'version']);
 const VALUE_FLAGS = new Set([
-  'prompt', 'file', 'mode', 'task', 'token-budget', 'clarify',
+  'prompt', 'file', 'mode', 'task', 'token-budget', 'clarify', 'scaffold',
   'language', 'audience', 'constraints', 'max-bytes',
 ]);
 
@@ -113,8 +115,10 @@ OPTIONS
   --mode <name>             final_only | compact | standard (default) | diagnostic
   --task <type>             ${VALID_TASKS.join(' | ')}
   --token-budget <level>    minimal | balanced (default) | generous
-                            minimal drops <context> (when not load-bearing) and <quality_bar>.
+                            minimal drops <quality_bar>.
   --clarify <policy>        auto (default) | always | never
+  --scaffold <policy>       auto (default): a well-specified prompt keeps its own structure and
+                            only loses padding | always: scaffold every prompt
   --language <code>         it | en  (auto-detected if omitted)
   --audience <text>         Free-text audience description.
   --constraints <list>      Pipe-separated, e.g. "max 200 words|no markdown".
@@ -237,6 +241,8 @@ function buildOptions(flags: Record<string, string | boolean>, original: string)
   if (budget) opts.tokenBudget = budget;
   const clarify = pickFromUnion(flags.clarify, VALID_CLARIFY, 'clarify');
   if (clarify) opts.askClarifyingQuestions = clarify;
+  const scaffold = pickFromUnion(flags.scaffold, VALID_SCAFFOLD, 'scaffold');
+  if (scaffold) opts.scaffold = scaffold;
   const language = pickFromUnion(flags.language, ['it', 'en'] as const, 'language');
   if (language) opts.language = language;
   if (typeof flags.audience === 'string') opts.audience = flags.audience;

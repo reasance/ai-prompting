@@ -29,7 +29,7 @@ Do **not** invoke this Skill when the user simply wants you to *answer* a questi
 5. **Decide on clarification.** Default: produce the rewrite with `[ASSUMPTION: ...]` markers; ask only when the policy below says the result would otherwise be wrong.
    - Critical missing info → ask up to 3 focused questions (see [clarification-policy](references/clarification-policy.md)). When the host has a structured-choice primitive (e.g. `AskUserQuestion` in Claude Code), prefer it over markdown MCQ — see [rendering rules](references/clarification-policy.md#rendering).
    - Otherwise → proceed and surface explicit `[ASSUMPTION: ...]` markers.
-6. **Rewrite** using the smallest effective structure (see [prompt-patterns](references/prompt-patterns.md)).
+6. **Rewrite** using the smallest effective structure (see [prompt-patterns](references/prompt-patterns.md)). A prompt that already states its deliverable, its limits and its output format is returned with its padding removed and its own structure kept — re-sectioning it only reshuffles it — unless `scaffold: always`. Never add a section with nothing true to say: no placeholder context, no restated output format, no quality line that points at something the prompt lacks.
 7. **Score structural coverage** of original vs improved against the rubric (see [prompt-quality-rubric](references/prompt-quality-rubric.md)). It measures whether the prompt *declares* role/objective/constraints/format/criteria — not whether it asks for the right thing. Never present it as a quality or performance claim, and never report a confidence level.
 8. **Return** the result in the requested output mode.
 9. **Offer execution.** After the output block, append a 2-choice prompt asking what to do next. Show it in `compact` / `standard` / `diagnostic`. Skip it when the request implies output only — `final_only`, "just the prompt", piped or CI use, a single-shot host with no follow-up turn — and when invoked from the deterministic CLI (no agent to interpret the reply).
@@ -72,6 +72,7 @@ definition: adapters translate their own syntax into it and do not redefine sema
 | `audience` | `--audience` | free text | none | Injected into `<context>` as `Audience: …`; suppresses the audience question. |
 | `tokenBudget` | `--token-budget` | `minimal` · `balanced` · `generous` | `balanced` | Size of the *generated* prompt — see [cost-control](references/cost-control.md). |
 | `clarify` | `--clarify` | `auto` · `always` · `never` | `auto` | Question policy — see [clarification-policy](references/clarification-policy.md#policy-overrides). |
+| `scaffold` | `--scaffold` | `auto` · `always` | `auto` | `auto` keeps a well-specified prompt's own structure and only strips padding; `always` scaffolds every prompt — see [prompt-patterns](references/prompt-patterns.md#defaults-the-cli-fills-in). |
 
 `targetAgent` is honored by the **Skill layer only** — an agent can genuinely adapt its rewrite.
 The deterministic CLI has no adapter branches, so it exposes no `--target` flag rather than

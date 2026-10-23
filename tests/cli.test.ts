@@ -50,6 +50,7 @@ test('buildOptions: every documented flag reaches PromptImproverOptions', () => 
     '--audience', 'CTOs',
     '--token-budget', 'minimal',
     '--clarify', 'never',
+    '--scaffold', 'always',
     '--constraints', 'max 200 words|no markdown',
   ]);
 
@@ -59,6 +60,7 @@ test('buildOptions: every documented flag reaches PromptImproverOptions', () => 
   assert.equal(opts.audience, 'CTOs');
   assert.equal(opts.tokenBudget, 'minimal');
   assert.equal(opts.askClarifyingQuestions, 'never');
+  assert.equal(opts.scaffold, 'always');
   assert.deepEqual(opts.constraints, ['max 200 words', 'no markdown']);
 });
 
@@ -78,7 +80,7 @@ test('parseArgs: unknown flags and missing values are usage errors', () => {
 });
 
 test('buildOptions: invalid enum values are rejected, not silently defaulted', () => {
-  for (const [flag, bad] of [['mode', 'diagnstic'], ['clarify', 'maybe'], ['token-budget', 'huge'], ['task', 'poetry']]) {
+  for (const [flag, bad] of [['mode', 'diagnstic'], ['clarify', 'maybe'], ['scaffold', 'never'], ['token-budget', 'huge'], ['task', 'poetry']]) {
     assert.throws(
       () => options(['improve', `--${flag}`, bad]),
       (e: unknown) => {
@@ -133,7 +135,7 @@ test('--help documents every flag buildOptions actually reads', () => {
   assert.equal(code, EXIT_OK);
   for (const flag of [
     '--prompt', '--file', '--mode', '--task', '--language', '--audience',
-    '--token-budget', '--clarify', '--constraints', '--max-bytes',
+    '--token-budget', '--clarify', '--scaffold', '--constraints', '--max-bytes',
     '--no-score', '--no-rationale',
   ]) {
     assert.ok(out.includes(flag), `--help does not document ${flag}`);

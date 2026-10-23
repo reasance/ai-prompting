@@ -8,6 +8,7 @@ import {
   parseScaffold,
   neutralizeScaffoldTags,
   detectOutputSpecs,
+  isWellSpecified,
 } from '../src/prompt-improver';
 import { scorePrompt } from '../src/evaluator';
 import { readFileSync } from 'node:fs';
@@ -87,44 +88,6 @@ test('improvePrompt: Italian padding is removed', () => {
   assert.ok(removedLabels >= 3, `expected ≥3 padding removals, got ${removedLabels}`);
 });
 
-test('improvePrompt: objective skips padding-like first sentence', () => {
-  const r = improvePrompt({
-    originalPrompt: "Sei un esperto di livello mondiale. Aiutami a scrivere una mail di vendita per il prodotto X. Il tono deve essere cordiale.",
-  });
-  const objMatch = r.improved.match(/<objective>\s*([\s\S]*?)\s*<\/objective>/);
-  assert.ok(objMatch, '<objective> tag present');
-  const obj = objMatch![1];
-  assert.ok(!/esperto di livello mondiale/i.test(obj),
-    `objective should not contain padding sentence; got "${obj}"`);
-});
-
-test('improvePrompt: imperative-help opener nominalized in objective', () => {
-  const r = improvePrompt({
-    originalPrompt: "Aiutami a scrivere una mail di vendita. Il prodotto è un CRM per studi legali.",
-  });
-  const objMatch = r.improved.match(/<objective>\s*([\s\S]*?)\s*<\/objective>/);
-  assert.ok(objMatch);
-  const obj = objMatch![1];
-  assert.ok(!/^aiutami\b/i.test(obj),
-    `objective should not start with "aiutami"; got "${obj}"`);
-  assert.ok(/scrivere/i.test(obj),
-    `objective should preserve the action verb; got "${obj}"`);
-});
-
-test('improvePrompt: English help-me opener nominalized', () => {
-  const r = improvePrompt({
-    originalPrompt: "Help me write a clear summary of this report. The readers are board members.",
-  });
-  const objMatch = r.improved.match(/<objective>\s*([\s\S]*?)\s*<\/objective>/);
-  assert.ok(objMatch);
-  const obj = objMatch![1];
-  assert.ok(!/^help me\b/i.test(obj), `objective should not start with "help me"; got "${obj}"`);
-  assert.ok(/write/i.test(obj));
-});
-
-// --token-budget is only worth having if it actually shrinks the generated
-// prompt. `minimal` used to emit all seven sections and merely swap two default
-// constraint lines for one, so it saved ~9% where the docs promised two blocks.
 test('improvePrompt: token-budget minimal drops <quality_bar>', () => {
   const original = 'Research the adoption of passkeys in European banking apps.';
   const minimal = improvePrompt({ originalPrompt: original, tokenBudget: 'minimal' });
@@ -444,7 +407,7 @@ test('improvePrompt: reports a delta without dressing it as confidence', () => {
 test('padding: overlapping matches leave no dangling fragment', () => {
   // Three patterns overlap in this sentence; removing them one at a time left
   // "Take a deep breath and" inside <task>.
-  const r = improvePrompt({ originalPrompt: example('coding-prompt.md') });
+  const r = improvePrompt({ originalPrompt: example('coding-prompt.md'), scaffold: 'always' });
   const task = sectionOf(r.improved, 'task') || '';
   assert.ok(!/deep breath|world-class|step by step/i.test(task), `padding survived: ${task}`);
   assert.ok(/no ESM\.$/.test(task.trim()), `task must end on the last real sentence, got: …${task.slice(-40)}`);
@@ -457,24 +420,6 @@ test('padding: a connective glued to the padding goes with it', () => {
   assert.match(sectionOf(it.improved, 'task') || '', /Scrivi le note di rilascio per la v2\.$/);
 });
 
-test('output format: a stated length and count beat the task-type default', () => {
-  const r = improvePrompt({ originalPrompt: example('agentic-tool-prompt.md') });
-  const fmt = sectionOf(r.improved, 'output_format') || '';
-  assert.match(fmt, /200-word summary/);
-  assert.match(fmt, /three follow-up research questions/);
-  assert.ok(!/3-5 sentences/.test(fmt), `research default leaked into a user-specified format: ${fmt}`);
-  assert.ok(!/first try/.test(sectionOf(r.improved, 'quality_bar') || ''),
-    'the quality bar must point at the stated spec, not at a generic format');
-});
-
-test('output format: an "Output:" line is kept as the format', () => {
-  const r = improvePrompt({ originalPrompt: example('research-prompt.md') });
-  assert.equal(
-    sectionOf(r.improved, 'output_format'),
-    'Every output requirement stated above, exactly — including: 600-word summary with inline citations and a numbered source list.',
-  );
-});
-
 test('detectOutputSpecs: counts with units, not stray numbers', () => {
   assert.deepEqual(detectOutputSpecs('Riassumi in 3 bullet, max 30 parole totali.'), ['3 bullet', '30 parole totali']);
   assert.deepEqual(detectOutputSpecs('The codebase uses TypeScript 5.4, Node 20.'), []);
@@ -482,7 +427,7 @@ test('detectOutputSpecs: counts with units, not stray numbers', () => {
 });
 
 test('defaults: evidence constraints stay on research and off code and email', () => {
-  const coding = improvePrompt({ originalPrompt: example('coding-prompt.md') }).improved;
+  const coding = improvePrompt({ originalPrompt: example('coding-prompt.md'), scaffold: 'always' }).improved;
   const email = improvePrompt({ originalPrompt: 'Scrivi una mail a un cliente arrabbiato per un ritardo.' }).improved;
   const research = improvePrompt({ originalPrompt: 'Research the adoption of passkeys in banking apps.' }).improved;
   for (const [name, text] of [['coding', coding], ['email', email]] as const) {
@@ -493,30 +438,10 @@ test('defaults: evidence constraints stay on research and off code and email', (
   assert.match(research, /facts, inferences, and assumptions/);
 });
 
-test('defaults: a default the task already states is not repeated', () => {
-  // The coding example says "Preserve the public signature" and "Do not
-  // introduce new dependencies"; both coding defaults are redundant there.
-  const r = improvePrompt({ originalPrompt: example('coding-prompt.md') });
-  assert.equal(sectionOf(r.improved, 'constraints'), '- Preserve the public signature.\n- Do not introduce new dependencies.');
-});
-
-test('objective: never repeats the first sentence of the task', () => {
-  for (const name of ['coding-prompt.md', 'research-prompt.md', 'agentic-tool-prompt.md']) {
-    const r = improvePrompt({ originalPrompt: example(name) });
-    const objective = sectionOf(r.improved, 'objective');
-    const task = sectionOf(r.improved, 'task') || '';
-    if (objective) assert.ok(!task.includes(objective), `${name}: objective duplicated inside task`);
-  }
-  const single = improvePrompt({ originalPrompt: 'Summarize the incident report for the on-call engineer.' });
-  assert.equal(sectionOf(single.improved, 'objective'), null, 'a one-sentence prompt is a task, not task + objective');
-});
-
-// --- 0.4.1: what the probes still flagged on 0.4.0 -----------------------
-
 test('context: no placeholder block; only real context is emitted', () => {
   // The placeholder carried no information and invited an assumptions preamble.
   for (const language of ['it', 'en'] as const) {
-    const r = improvePrompt({ originalPrompt: example('coding-prompt.md'), language });
+    const r = improvePrompt({ originalPrompt: example('coding-prompt.md'), language, scaffold: 'always' });
     assert.equal(sectionOf(r.improved, 'context'), null);
     assert.ok(r.assumptions.length > 0, 'assumptions are still reported, outside the prompt');
   }
@@ -524,17 +449,8 @@ test('context: no placeholder block; only real context is emitted', () => {
   assert.equal(sectionOf(withAudience.improved, 'context'), 'Audience: enterprise admins.');
 });
 
-test('output format: points at the stated requirements instead of paraphrasing them', () => {
-  const r = improvePrompt({ originalPrompt: example('agentic-tool-prompt.md') });
-  const fmt = sectionOf(r.improved, 'output_format') || '';
-  assert.match(fmt, /^Every output requirement stated above, exactly — including:/);
-  // What a lossy restatement used to drop must still be in the prompt.
-  assert.match(r.improved, /Cite every claim with a URL\./);
-  assert.match(r.improved, /stop and report/);
-});
-
 test('constraints: prohibitions move out of the task, verbatim', () => {
-  const r = improvePrompt({ originalPrompt: example('coding-prompt.md') });
+  const r = improvePrompt({ originalPrompt: example('coding-prompt.md'), scaffold: 'always' });
   const task = sectionOf(r.improved, 'task') || '';
   assert.ok(!/Preserve the public signature|Do not introduce new dependencies/.test(task), task);
   assert.match(task, /Add unit tests covering/);
@@ -555,18 +471,8 @@ test('quality bar: no line that points at something the prompt does not have', (
   assert.equal(sectionOf(email.improved, 'quality_bar'), null, 'nothing checkable to say → no section');
 });
 
-test('role: the prompt\'s own "You are…" sentence is the role, and ours does not contradict the task', () => {
-  const r = improvePrompt({ originalPrompt: example('agentic-tool-prompt.md') });
-  assert.equal(sectionOf(r.improved, 'role'), 'You are an agent with web_search, file_read, and code_exec tools.');
-  assert.equal((r.improved.match(/You are an agent/g) || []).length, 1, 'role stated twice');
-  // Without a user role the default must defer to the task's stop/retry rules.
-  const fallback = improvePrompt({ originalPrompt: 'Use the search tools to find three sources. Stop after 2 attempts.' });
-  assert.ok(!/recovers from errors/.test(fallback.improved));
-  assert.match(sectionOf(fallback.improved, 'role') || '', /follows the task's stop and retry rules/);
-});
-
 test('role: coding names the language instead of an unfilled slot', () => {
-  const ts = improvePrompt({ originalPrompt: example('coding-prompt.md') });
+  const ts = improvePrompt({ originalPrompt: example('coding-prompt.md'), scaffold: 'always' });
   assert.equal(sectionOf(ts.improved, 'role'), 'Senior TypeScript engineer.');
   const py = improvePrompt({ originalPrompt: 'Refactor the class in app/models.py to use dataclasses.', language: 'it' });
   assert.equal(sectionOf(py.improved, 'role'), 'Senior software engineer esperto di Python.');
@@ -575,8 +481,8 @@ test('role: coding names the language instead of an unfilled slot', () => {
 });
 
 test('coding format: a repository task is edited in place, not answered in chat', () => {
-  const repo = improvePrompt({ originalPrompt: example('coding-prompt.md') });
-  assert.match(sectionOf(repo.improved, 'output_format') || '', /^Edit the files in place; run the build and the affected tests/);
+  const repo = improvePrompt({ originalPrompt: example('coding-prompt.md'), scaffold: 'always' });
+  assert.match(sectionOf(repo.improved, 'output_format') || '', /^Edit the files in place; if you can run commands, run the build and the affected tests/);
   const chat = improvePrompt({ originalPrompt: 'Write a function that debounces a callback.' });
   assert.match(sectionOf(chat.improved, 'output_format') || '', /^Code in a fenced block/);
 });
@@ -600,4 +506,93 @@ test('inferTaskType: padding does not decide the task type', () => {
   // "world-class" contains the coding keyword `class`.
   const r = improvePrompt({ originalPrompt: 'You are a world-class expert. Take a deep breath. Help me write something good.' });
   assert.notEqual(r.taskType, 'coding');
+});
+
+// --- 0.4.2: what the probes still flagged on 0.4.1 -----------------------
+
+test('well-specified prompts keep their structure and only lose padding', () => {
+  for (const name of ['coding-prompt.md', 'agentic-tool-prompt.md', 'research-prompt.md']) {
+    const r = improvePrompt({ originalPrompt: example(name) });
+    assert.ok(!r.improved.includes('<role>'), `${name} was re-scaffolded`);
+    assert.ok(!/deep breath|world-class|step by step/i.test(r.improved), `${name}: padding survived`);
+    assert.ok(r.changes.some((c) => c.type === 'preserved_user_text' && /Well-specified/.test(c.detail)));
+  }
+  assert.equal(
+    improvePrompt({ originalPrompt: example('coding-prompt.md') }).improved,
+    example('coding-prompt.md').replace(/ Take a deep breath[\s\S]*$/, '').trim(),
+  );
+  // Short or open requests still get the scaffold.
+  for (const p of ['help me write something good', 'Scrivi una mail a un cliente arrabbiato per un ritardo.']) {
+    assert.ok(improvePrompt({ originalPrompt: p }).improved.includes('<role>'), p);
+  }
+  // A leading scaffold is the user's own structure: merged, never passed through.
+  assert.equal(isWellSpecified(parseScaffold('<task>x</task>' + ' word'.repeat(40))), false);
+});
+
+test('output format: a format the prompt states is not restated', () => {
+  // A paraphrase dropped requirements (0.4.0); a pointer read as filler (0.4.1).
+  for (const name of ['agentic-tool-prompt.md', 'research-prompt.md']) {
+    const r = improvePrompt({ originalPrompt: example(name), scaffold: 'always' });
+    assert.equal(sectionOf(r.improved, 'output_format'), null, name);
+    assert.ok(!/3-5 sentences/.test(r.improved), `${name}: task-type default leaked`);
+    assert.ok(!/exactly|stated above/.test(r.improved), `${name}: pointer or "exactly" leaked`);
+  }
+  const agentic = improvePrompt({ originalPrompt: example('agentic-tool-prompt.md'), scaffold: 'always' }).improved;
+  for (const kept of ['200-word summary plus three follow-up research questions', 'Cite every claim with a URL.', 'stop and report']) {
+    assert.ok(agentic.includes(kept), `lost: ${kept}`);
+  }
+});
+
+test('detectOutputSpecs: an "Output:" line is read without its label', () => {
+  assert.deepEqual(detectOutputSpecs('Output: 600-word summary with inline citations.'), ['600-word summary with inline citations']);
+});
+
+test('objective: only the user\'s own, never carved out of the body by position', () => {
+  for (const name of ['coding-prompt.md', 'agentic-tool-prompt.md', 'research-prompt.md']) {
+    const r = improvePrompt({ originalPrompt: example(name), scaffold: 'always' });
+    assert.equal(sectionOf(r.improved, 'objective'), null, name);
+  }
+  const supplied = improvePrompt({ originalPrompt: '<objective>Ship v2.</objective>\n<task>Write the notes.</task>' });
+  assert.equal(sectionOf(supplied.improved, 'objective'), 'Ship v2.');
+});
+
+test('defaults: a default the task already states is not repeated', () => {
+  const r = improvePrompt({ originalPrompt: example('coding-prompt.md'), scaffold: 'always' });
+  assert.equal(
+    sectionOf(r.improved, 'constraints'),
+    '- Preserve the public signature.\n- Do not introduce new dependencies.\n- Preserve existing behavior; existing tests must still pass.',
+    'the user\'s two lines, then only the refactor default the prompt does not already state',
+  );
+});
+
+test('role: a "You are…" sentence listing tools is context, not a role', () => {
+  const r = improvePrompt({ originalPrompt: example('agentic-tool-prompt.md'), scaffold: 'always' });
+  assert.equal(sectionOf(r.improved, 'context'), 'You are an agent with web_search, file_read, and code_exec tools.');
+  assert.match(sectionOf(r.improved, 'role') || '', /follows the task's stop and retry rules/);
+  assert.ok(!/recovers from errors/.test(r.improved));
+  assert.equal((r.improved.match(/You are an agent/g) || []).length, 1, 'stated twice');
+  // A "You are…" sentence that is a role stays the role.
+  const role = improvePrompt({ originalPrompt: 'You are a release manager for a B2B SaaS. Write the notes for v2.' });
+  assert.equal(sectionOf(role.improved, 'role'), 'You are a release manager for a B2B SaaS.');
+});
+
+test('correspondence: no unauthorised remedies; complaints get a tone line', () => {
+  const r = improvePrompt({ originalPrompt: 'Scrivi una mail a un cliente arrabbiato per un ritardo nella consegna.' });
+  assert.ok(!/rimedio concreto/.test(r.improved), 'the format must not presuppose a remedy');
+  assert.match(r.improved, /Non promettere rimborsi, sconti o altri rimedi/);
+  assert.match(r.improved, /Riconosci il problema e scusati prima di spiegare/);
+  const neutral = improvePrompt({ originalPrompt: 'Write an email inviting the team to the offsite.' });
+  assert.ok(!/apologise/.test(neutral.improved), 'no apology line when nothing went wrong');
+  assert.ok(!/refunds, discounts/.test(neutral.improved), 'no remedy line when nothing went wrong');
+  const raise = improvePrompt({ originalPrompt: 'Aiutami a scrivere una mail per chiedere un aumento.' });
+  assert.ok(!/rimborsi, sconti/.test(raise.improved), 'a raise request is not a complaint');
+  assert.equal(sectionOf(neutral.improved, 'role'), 'Professional correspondence writer.');
+});
+
+test('coding: refactors keep behavior; the repo format does not assume a shell', () => {
+  const refactor = improvePrompt({ originalPrompt: 'Refactor the auth module in src/auth.ts to remove the global state.' });
+  assert.match(refactor.improved, /Preserve existing behavior; existing tests must still pass\./);
+  assert.match(sectionOf(refactor.improved, 'output_format') || '', /if you can run commands/);
+  const feature = improvePrompt({ originalPrompt: 'Add a retry option to the HTTP client in src/http.ts.' });
+  assert.ok(!/Preserve existing behavior/.test(feature.improved), 'behavior lock only on refactors');
 });

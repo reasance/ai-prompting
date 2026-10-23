@@ -17,6 +17,8 @@ export type TokenBudget = 'minimal' | 'balanced' | 'generous';
 
 export type ClarificationPolicy = 'auto' | 'always' | 'never';
 
+export type ScaffoldPolicy = 'auto' | 'always';
+
 export interface PromptImproverOptions {
   originalPrompt: string;
   targetModel?: string;
@@ -28,6 +30,8 @@ export interface PromptImproverOptions {
   constraints?: string[];
   tokenBudget?: TokenBudget;
   askClarifyingQuestions?: ClarificationPolicy;
+  /** `auto` keeps a well-specified prompt's own structure and only strips padding. */
+  scaffold?: ScaffoldPolicy;
 }
 
 export interface RubricCategoryScore {

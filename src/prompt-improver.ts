@@ -204,8 +204,8 @@ const ROLE_BY_TASK: Record<TaskType, { it: string; en: string }> = {
     en: 'Senior analyst focused on evidence and fact/inference separation.',
   },
   correspondence: {
-    it: 'Redattore di corrispondenza professionale: chiaro, responsabile, chiude con un prossimo passo concreto.',
-    en: 'Professional correspondence writer: clear, accountable, ends with a concrete next step.',
+    it: 'Redattore di corrispondenza professionale.',
+    en: 'Professional correspondence writer.',
   },
   'data-extraction': {
     it: 'Specialista di information extraction su schema deterministico.',
@@ -251,8 +251,8 @@ const OUTPUT_FORMAT_BY_TASK: Record<TaskType, { it: string; en: string }> = {
     en: 'Thesis in one sentence; evidences with precise references; counterfactuals considered; final recommendation with confidence level.',
   },
   correspondence: {
-    it: 'Oggetto; saluto; 2-4 paragrafi brevi; prossimo passo o rimedio concreto; chiusura. Dettagli sconosciuti come [segnaposto].',
-    en: 'Subject line; greeting; 2-4 short paragraphs; a concrete next step or remedy; sign-off. Unknown specifics as [placeholders].',
+    it: 'Oggetto; saluto; 2-4 paragrafi brevi; un prossimo passo concreto; chiusura.',
+    en: 'Subject line; greeting; 2-4 short paragraphs; one concrete next step; sign-off.',
   },
   'data-extraction': {
     it: 'Solo JSON valido (conforme allo schema, se ne è dato uno). Nessuna prosa. Campi mancanti = null. evidence_quote testuale, non parafrasi.',
@@ -388,55 +388,6 @@ function stripPadding(text: string): { cleaned: string; removed: Array<{ phrase:
   return { cleaned, removed };
 }
 
-const HELP_OPENER_RE = /^\s*(aiutami\s+a\s+|help\s+me\s+(?:to\s+)?|please\s+(?:help\s+me\s+)?|puoi\s+|can\s+you\s+|could\s+you\s+|potresti\s+|fammi\s+|dammi\s+)/i;
-
-const PADDING_LIKE_SENTENCE_RE = /^(you\s+are\s+|sei\s+un|i\s+will\s+tip|ti\s+(darò|daro|pago)|take\s+a\s+deep|fai\s+un\s+respiro|think\s+step|pensa(?:ci)?\s+passo|ragiona\s+passo|let'?s\s+think|my\s+(career|job|life)\s+depends|la\s+mia\s+(carriera|vita)\s+dipende|il\s+mio\s+(lavoro|ruolo)\s+dipende)/i;
-
-function nominalizeImperative(s: string): string {
-  const stripped = s.replace(HELP_OPENER_RE, '').trim();
-  if (!stripped) return s;
-  return stripped.charAt(0).toUpperCase() + stripped.slice(1);
-}
-
-interface ObjectiveSource {
-  objective: string;
-  /** The body sentence the objective was read from, verbatim; null when supplied or a placeholder. */
-  sentence: string | null;
-}
-
-function splitSentences(text: string): string[] {
-  return text
-    .split(/(?<=[.!?])\s+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
-
-function extractObjective(scaffold: ParsedScaffold, lang: 'it' | 'en'): ObjectiveSource {
-  const existing = scaffold.sections.objective || scaffold.sections.goal;
-  if (existing) return { objective: existing, sentence: null };
-
-  // Read the objective out of the free-text body only. Reading it out of the
-  // whole input used to splice raw markup — a user's own <constraints> block
-  // ended up quoted verbatim inside <objective>.
-  const sentences = splitSentences(neutralizeScaffoldTags(scaffold.body)).filter(
-    (s) => s.length > 8 && s.length < 280,
-  );
-
-  for (const candidate of sentences) {
-    if (PADDING_LIKE_SENTENCE_RE.test(candidate)) continue;
-    const objective = HELP_OPENER_RE.test(candidate) ? nominalizeImperative(candidate) : candidate;
-    return { objective, sentence: candidate };
-  }
-
-  return {
-    objective:
-      lang === 'it'
-        ? '[ASSUNZIONE: dedurre l\'obiettivo dal prompt utente]'
-        : '[ASSUMPTION: infer the objective from the user prompt]',
-    sentence: null,
-  };
-}
-
 const NUMBER_WORDS =
   'one|two|three|four|five|six|seven|eight|nine|ten|twelve|fifteen|twenty|' +
   'uno|una|due|tre|quattro|cinque|sei|sette|otto|nove|dieci|dodici|quindici|venti';
@@ -472,7 +423,7 @@ export function detectOutputSpecs(body: string): string[] {
   return [...new Set(specs)];
 }
 
-type ConstraintGroup = 'evidence' | 'coding' | 'prose' | 'extraction' | 'agentic' | 'general';
+type ConstraintGroup = 'evidence' | 'coding' | 'prose' | 'correspondence' | 'extraction' | 'agentic' | 'general';
 
 const CONSTRAINT_GROUP: Record<TaskType, ConstraintGroup> = {
   research: 'evidence',
@@ -481,18 +432,24 @@ const CONSTRAINT_GROUP: Record<TaskType, ConstraintGroup> = {
   education: 'evidence',
   coding: 'coding',
   writing: 'prose',
-  correspondence: 'prose',
+  correspondence: 'correspondence',
   creative: 'prose',
   'data-extraction': 'extraction',
   'agentic-workflow': 'agentic',
   general: 'general',
 };
 
+// Something went wrong for the recipient: an apology is due, and a remedy is
+// the sender's to authorise, not the model's to offer.
+const COMPLAINT_RE = /\b(arrabbiat|furios|scontent|lament|reclam|ritard|disserviz|angry|upset|complain|delay|late|apolog|scus)/i;
+
 interface DefaultLine {
   it: string;
   en: string;
   /** Skip the default when the prompt already says it. */
   unless?: RegExp;
+  /** Add the default only when the prompt matches. */
+  when?: RegExp;
 }
 
 // Defaults are keyed on the task type, never on a model. "Distinguish facts,
@@ -505,6 +462,13 @@ const DEFAULT_CONSTRAINTS: Record<ConstraintGroup, DefaultLine[]> = {
     { it: 'Se mancano informazioni critiche, dichiarale invece di inventarle.', en: 'If critical information is missing, declare it rather than inventing.' },
   ],
   coding: [
+    {
+      // "Affected tests pass" alone can be met by writing lenient tests.
+      it: 'Mantieni il comportamento esistente; i test già presenti devono continuare a passare.',
+      en: 'Preserve existing behavior; existing tests must still pass.',
+      when: /\b(refactor|restructure|rewrite|riscriv|ristruttur|riorganizz)/i,
+      unless: /\b(preserve|keep|mantieni|preserva)\s+(the\s+|il\s+)?(existing\s+)?(behaviou?r|comportamento)/i,
+    },
     {
       it: 'Preserva le interfacce pubbliche esistenti salvo indicazione contraria.',
       en: 'Preserve existing public interfaces unless the task says otherwise.',
@@ -520,6 +484,24 @@ const DEFAULT_CONSTRAINTS: Record<ConstraintGroup, DefaultLine[]> = {
     {
       it: 'Dettagli specifici sconosciuti (nomi, date, cifre) vanno tra [parentesi quadre], mai inventati.',
       en: 'Unknown specifics (names, dates, figures) go in [brackets]; never invent them.',
+    },
+  ],
+  correspondence: [
+    {
+      it: 'Dettagli specifici sconosciuti (nomi, date, cifre) vanno tra [parentesi quadre], mai inventati.',
+      en: 'Unknown specifics (names, dates, figures) go in [brackets]; never invent them.',
+    },
+    {
+      // The 0.4.x format asked for "a concrete remedy", which pushed models to
+      // offer refunds or discounts nobody had authorised.
+      it: 'Non promettere rimborsi, sconti o altri rimedi che la richiesta non indica; se servono, scrivili come [da confermare].',
+      en: 'Do not promise refunds, discounts or other remedies the request does not mention; if one is needed, write it as [to be confirmed].',
+      when: COMPLAINT_RE,
+    },
+    {
+      it: 'Riconosci il problema e scusati prima di spiegare; nessuno scaricabarile.',
+      en: 'Acknowledge the problem and apologise before explaining; no blame-shifting.',
+      when: COMPLAINT_RE,
     },
   ],
   extraction: [
@@ -548,10 +530,18 @@ const DEFAULT_QUALITY_BAR: Record<ConstraintGroup, DefaultLine[]> = {
   evidence: [{ it: 'Risposta verificabile: ogni claim non banale ha evidenza o fonte.', en: 'Answer is verifiable: every non-trivial claim has evidence or a source.' }],
   coding: [{ it: 'Compila senza errori e i test interessati passano.', en: 'Builds cleanly and the affected tests pass.' }],
   prose: [],
+  correspondence: [],
   extraction: [{ it: 'L\'output è JSON valido; ogni valore è riconducibile alla fonte.', en: 'Output is valid JSON; every value is traceable to the source.' }],
   agentic: [{ it: 'Termina con il risultato, oppure con un resoconto di cosa è stato tentato e perché si è fermato.', en: 'Ends with the deliverable, or with a report of what was tried and why it stopped.' }],
   general: [],
 };
+
+function splitSentences(text: string): string[] {
+  return text
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
 
 function detectContradictions(text: string): string[] {
   const out: string[] = [];
@@ -624,7 +614,9 @@ function splitBulletBlock(block: string): string[] {
 }
 
 function applicableDefaults(lines: DefaultLine[], text: string, lang: 'it' | 'en'): string[] {
-  return lines.filter((l) => !l.unless || !l.unless.test(text)).map((l) => l[lang]);
+  return lines
+    .filter((l) => (!l.when || l.when.test(text)) && (!l.unless || !l.unless.test(text)))
+    .map((l) => l[lang]);
 }
 
 function inferConstraints(opts: PromptImproverOptions, lang: 'it' | 'en', taskType: TaskType, text: string): string[] {
@@ -642,6 +634,9 @@ function inferConstraints(opts: PromptImproverOptions, lang: 'it' | 'en', taskTy
 // A role the user wrote themselves ("You are an agent with web_search…") is
 // the role. Adding ours next to it gave the model two.
 const USER_ROLE_RE = /^(?:you\s+are|sei)\s+\S/i;
+// "You are an agent with web_search, file_read and code_exec tools" lists
+// capabilities; as a <role> it read as a tool inventory, so it goes to <context>.
+const CAPABILITY_RE = /\b(tools?|access\s+to|strumenti|accesso\s+a)\b/i;
 
 // Prohibitions and invariants read as actions when they sit in <task> next to
 // environment facts; they belong in <constraints>.
@@ -677,8 +672,8 @@ const REPO_TASK_RE =
   /(?:^|[\s`'"(])(?:[\w.-]+\/)*[\w-]+\.(?:ts|tsx|js|jsx|mjs|cjs|py|rs|go|java|kt|rb|php|cs|cpp|cc|h|swift|sql)\b|\b(?:src|lib|tests?|app)\/|\b(?:unit\s+)?tests?\b|\btest\s+(?:di\s+)?unit/i;
 
 const REPO_CODING_FORMAT = {
-  it: 'Modifica i file direttamente; esegui la build e i test interessati; rispondi con un breve riepilogo delle modifiche e dei risultati dei test.',
-  en: 'Edit the files in place; run the build and the affected tests; reply with a short summary of what changed and the test results.',
+  it: 'Modifica i file direttamente; se puoi eseguire comandi, lancia la build e i test interessati; rispondi con un breve riepilogo delle modifiche e dei risultati.',
+  en: 'Edit the files in place; if you can run commands, run the build and the affected tests; reply with a short summary of what changed and the results.',
 };
 
 function removeSentence(text: string, sentence: string): string {
@@ -704,12 +699,19 @@ function buildScaffold(
   const budget = opts.tokenBudget || 'balanced';
 
   // Role: the user's own, then a "You are …" opening sentence, then the default.
-  let role: string;
+  let role: string | null = null;
+  let capability: string | null = null;
   let body = safeBody;
   const firstSentence = splitSentences(safeBody)[0] || '';
+  const userRole = USER_ROLE_RE.test(firstSentence) && splitSentences(safeBody).length > 1;
+  if (userRole && CAPABILITY_RE.test(firstSentence) && !supplied.context) {
+    capability = firstSentence;
+    body = removeSentence(safeBody, firstSentence);
+    changes.push({ type: 'preserved_user_text', detail: 'context (the prompt\'s own capability sentence, moved to <context>)' });
+  }
   if (supplied.role) {
     role = supplied.role;
-  } else if (USER_ROLE_RE.test(firstSentence) && splitSentences(safeBody).length > 1) {
+  } else if (userRole && !capability) {
     role = firstSentence;
     body = removeSentence(safeBody, firstSentence);
     changes.push({ type: 'preserved_user_text', detail: 'role (the prompt\'s own "You are…" sentence, moved to <role>)' });
@@ -718,32 +720,11 @@ function buildScaffold(
     changes.push({ type: 'inferred_role', detail: `Role inferred from task type "${taskType}".` });
   }
 
-  // <objective> and <task> used to carry the same sentence verbatim. Now the
-  // objective is lifted *out* of the body: it is emitted only when the body has
-  // more to say than that one sentence. A one-sentence prompt is just a <task>.
-  const source = extractObjective({ sections: supplied, body }, lang);
-  let objective: string | null = null;
-  let taskBody: string;
-  if (supplied.task) {
-    // A supplied <task> wins over anything read from the body.
-    taskBody = supplied.task;
-    objective = supplied.objective || supplied.goal || (source.sentence ? source.objective : null);
-  } else if (supplied.objective || supplied.goal) {
-    objective = source.objective;
-    taskBody = body;
-  } else if (source.sentence && body.startsWith(source.sentence)) {
-    const rest = body.slice(source.sentence.length).trim();
-    if (rest) {
-      objective = source.objective;
-      taskBody = rest;
-      changes.push({ type: 'added_section', detail: 'objective (first sentence lifted out of the task)' });
-    } else {
-      taskBody = body;
-    }
-  } else {
-    taskBody = body;
-  }
-  if (!taskBody) taskBody = objective || '';
+  // <objective> is the user's own, never one we carve out of the body. 0.4.0
+  // lifted the first sentence into it, which split one deliverable by position
+  // (the refactor in <objective>, its tests in <task>).
+  const objective: string | null = supplied.objective || supplied.goal || null;
+  let taskBody: string = supplied.task || body || objective || '';
   if (!supplied.task) {
     changes.push({ type: 'added_section', detail: 'task (wraps original prompt body)' });
   }
@@ -769,8 +750,9 @@ function buildScaffold(
   // No placeholder <context>. A block saying "no separate context" carried no
   // information, and models read its "flag your assumptions" as a request to
   // open with a list of assumptions. Assumptions are reported outside the prompt.
-  const context = supplied.context || (opts.audience ? `Audience: ${opts.audience}.` : null);
-  if (context && !supplied.context) changes.push({ type: 'added_section', detail: 'context (audience)' });
+  const contextLines = [capability, opts.audience ? `Audience: ${opts.audience}.` : null].filter(Boolean);
+  const context = supplied.context || (contextLines.length ? contextLines.join('\n') : null);
+  if (opts.audience && !supplied.context) changes.push({ type: 'added_section', detail: 'context (audience)' });
 
   const group = CONSTRAINT_GROUP[taskType];
 
@@ -794,15 +776,15 @@ function buildScaffold(
   // default — and is pointed at, not paraphrased: a short restatement used to
   // drop the requirements it left out (URL citations, the failure report).
   const specs = supplied.output_format ? [] : detectOutputSpecs(fullTask);
-  let outputFormat: string;
+  let outputFormat: string | null;
   if (supplied.output_format) {
     outputFormat = supplied.output_format;
   } else if (specs.length) {
-    outputFormat =
-      lang === 'it'
-        ? `Ogni requisito di output indicato sopra, alla lettera — tra cui: ${specs.join('; ')}.`
-        : `Every output requirement stated above, exactly — including: ${specs.join('; ')}.`;
-    changes.push({ type: 'preserved_user_text', detail: 'output_format (points at the user-stated spec; task-type default not applied)' });
+    // The prompt already says what the output is. A paraphrase dropped
+    // requirements (0.4.0) and a pointer read as filler (0.4.1), so the section
+    // is left out and the user's own wording stays the contract.
+    outputFormat = null;
+    changes.push({ type: 'preserved_user_text', detail: 'output_format (stated in the prompt; no task-type default added)' });
   } else if (taskType === 'coding' && REPO_TASK_RE.test(fullTask)) {
     outputFormat = REPO_CODING_FORMAT[lang];
     changes.push({ type: 'added_section', detail: 'output_format (repository task: edit in place, run tests, summarize)' });
@@ -818,13 +800,6 @@ function buildScaffold(
     changes.push({ type: 'preserved_user_text', detail: 'quality_bar (user-supplied, kept verbatim)' });
   } else {
     qualityBar = applicableDefaults(DEFAULT_QUALITY_BAR[group], fullTask, lang);
-    if (specs.length) {
-      qualityBar.push(
-        lang === 'it'
-          ? 'Rispetta ogni lunghezza, quantità e formato indicati sopra.'
-          : 'Respects every length, count, and format stated above.',
-      );
-    }
   }
   if (budget === 'generous') {
     qualityBar.push(
@@ -852,13 +827,29 @@ function buildScaffold(
   if (objective) sections.push(`<objective>\n${objective}\n</objective>`);
   if (context) sections.push(`<context>\n${context}\n</context>`);
   sections.push(`<task>\n${taskBody}\n</task>`);
-  // Every section is optional except role, task and output format: a section
-  // with nothing true to say is noise.
+  // Every section is optional except role and task: a section with nothing
+  // true to say is noise.
   if (constraintLines.length) sections.push(`<constraints>\n${constraintsBlock}\n</constraints>`);
-  sections.push(`<output_format>\n${outputFormat}\n</output_format>`);
+  if (outputFormat) sections.push(`<output_format>\n${outputFormat}\n</output_format>`);
   if (qualityBar.length && !dropQualityBar) sections.push(`<quality_bar>\n${qualityBlock}\n</quality_bar>`);
 
   return sections.join('\n\n');
+}
+
+const WELL_SPECIFIED_MIN_WORDS = 25;
+
+/**
+ * Free-text prompt of at least 25 words that already states either its output
+ * (a length, count, format or an `Output:` line) or at least two explicit
+ * constraints. A prompt that opens with scaffold tags is the user's own
+ * structure and is always merged, never passed through.
+ */
+export function isWellSpecified(scaffold: ParsedScaffold): boolean {
+  if (Object.keys(scaffold.sections).length) return false;
+  const body = scaffold.body;
+  if (wordCount(body) < WELL_SPECIFIED_MIN_WORDS) return false;
+  const constraints = splitSentences(body).filter((sentence) => IMPERATIVE_CONSTRAINT_RE.test(sentence)).length;
+  return detectOutputSpecs(body).length > 0 || constraints >= 2;
 }
 
 export function improvePrompt(opts: PromptImproverOptions): ImprovementResult {
@@ -954,7 +945,21 @@ export function improvePrompt(opts: PromptImproverOptions): ImprovementResult {
     );
   }
 
-  const improved = buildScaffold(scaffold, opts, lang, taskType, changes);
+  // A well-specified prompt is returned with its padding removed and nothing
+  // else. Re-sectioning one that already states its deliverable, its limits and
+  // its format only reshuffled it: both models we probed preferred the
+  // original for exactly these prompts.
+  const passThrough = opts.scaffold !== 'always' && isWellSpecified(scaffold);
+  let improved: string;
+  if (passThrough) {
+    improved = cleaned;
+    changes.push({
+      type: 'preserved_user_text',
+      detail: 'Well-specified prompt: structure kept, only padding removed (--scaffold always to force the scaffold).',
+    });
+  } else {
+    improved = buildScaffold(scaffold, opts, lang, taskType, changes);
+  }
 
   const before = scorePrompt(original);
   const after = scorePrompt(improved);

@@ -211,28 +211,35 @@ Se le quotes sono insufficienti, dichiaralo invece di estrapolare.
 
 ## Defaults the CLI fills in
 
-When the prompt is silent, the deterministic CLI adds defaults keyed on the task type — never on
-a model. It adds a section only when it has something true and checkable to put in it:
+**Well-specified prompts are left alone.** A free-text prompt of 25+ words that states its output
+(a length, count or format, or an `Output:` line) or at least two explicit constraints is returned
+with its padding removed and nothing else (`--scaffold always` overrides). Re-sectioning such a
+prompt only reshuffled it.
 
-- **Role.** A "You are …" opening sentence is the user's role and moves to `<role>`; otherwise the
-  task type's role, with the detected language for coding ("Senior TypeScript engineer.").
-- **Context.** Only real context: a `<context>` the user wrote, or `--audience`. No placeholder —
-  assumptions are reported next to the prompt, not inside it.
+Otherwise the deterministic CLI scaffolds, with defaults keyed on the task type — never on a model —
+and adds a section only when it has something true and checkable to put in it:
+
+- **Role.** A "You are …" opening sentence that is a role becomes `<role>`; one that lists tools or
+  access ("You are an agent with web_search…") goes to `<context>`. Otherwise the task type's role,
+  with the detected language for coding ("Senior TypeScript engineer.").
+- **Objective.** Only the user's own `<objective>`. The CLI does not carve one out of the body.
+- **Context.** Only real context: a user-written `<context>`, a capability sentence, or
+  `--audience`. No placeholder — assumptions are reported next to the prompt, not inside it.
 - **Constraints.** Sentences that prohibit or require ("Do not …", "Preserve …", "Never …", "Only …")
-  move from the task to `<constraints>` verbatim; the task-type defaults below are added unless the
-  prompt already says them.
-- **Output format.** A length, count or format the user stated (`200-word summary`, `3 bullet`, an
-  `Output:` line) is pointed at, not paraphrased: "Every output requirement stated above, exactly —
-  including: …". A coding prompt that names repository files or asks for tests gets "edit the files
-  in place, run the build and the affected tests, summarize" instead of a chat-style code block.
-- **Quality bar.** Only the lines below, plus "respects every length, count and format stated above"
-  when the user stated one. A type with nothing checkable to add gets no section.
+  move from the task to `<constraints>` verbatim; the task-type defaults below are added when they
+  apply and the prompt does not already say them.
+- **Output format.** When the prompt states one, no `<output_format>` is added — its own wording is
+  the contract. Otherwise the task type's format; a coding prompt that names repository files or asks
+  for tests gets "edit the files in place; if you can run commands, run the build and the affected
+  tests; summarize" instead of a chat-style code block.
+- **Quality bar.** Only the lines below. A type with nothing checkable to add gets no section.
 
 | Task type | Default `<constraints>` | Default `<quality_bar>` |
 |---|---|---|
 | research · analysis · business · education | distinguish facts / inferences / assumptions; declare missing info | every non-trivial claim has evidence or a source |
-| coding | preserve public interfaces; no new dependencies | builds cleanly, affected tests pass |
-| writing · correspondence · creative | unknown specifics in `[brackets]`, never invented | — |
+| coding | preserve existing behavior and existing tests (refactors only); preserve public interfaces; no new dependencies | builds cleanly, affected tests pass |
+| correspondence | unknown specifics in `[brackets]`; no refunds, discounts or remedies the request does not mention; acknowledge and apologise before explaining (complaints only) | — |
+| writing · creative | unknown specifics in `[brackets]`, never invented | — |
 | data-extraction | missing fields are `null`, never inferred | valid JSON, values traceable to the source |
 | agentic-workflow | on tool error retry once, then fall back or report | ends with the deliverable or a report of what was tried and why it stopped |
 | general | declare missing info | — |

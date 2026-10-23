@@ -57,7 +57,7 @@ Concretely, on every prompt it:
 1. **Detects** language (it/en) and task type (research, coding, writing, correspondence, analysis, data-extraction, agentic-workflow, creative, business, education, general).
 2. **Strips** padding that hurts modern reasoning models — `"you are a world-class…"`, `"take a deep breath"`, `"think step by step"`, `"I will tip you…"` plus Italian variants (`"sei un esperto di livello mondiale"`, `"fai un respiro profondo"`, `"pensaci passo passo"`).
 3. **Decides whether to ask** for clarification (only when info is critical, contradictions exist, or the domain is high-risk: legal, medical, financial, security, production code).
-4. **Rewrites** with a canonical XML scaffold (`<role>`, `<objective>`, `<context>`, `<task>`, `<constraints>`, `<output_format>`, `<quality_bar>`).
+4. **Rewrites** with a canonical XML scaffold (`<role>`, `<objective>`, `<context>`, `<task>`, `<constraints>`, `<output_format>`, `<quality_bar>`), adding a section only when it has something true to say. A prompt that is already well specified — 25+ words that state their output format or at least two explicit constraints — keeps its own structure and only loses padding (`--scaffold always` forces the scaffold).
 5. **Scores** structural coverage on a 100-point heuristic rubric (9 categories), before/after.
 6. **Surfaces** every assumption it made as `[ASSUMPTION: …]` — so you can correct without rerunning.
 
@@ -145,6 +145,7 @@ ai-prompting --help
 | `--task <type>` | research / writing / correspondence / coding / analysis / data-extraction / agentic-workflow / creative / business / education / general | inferred | overrides the keyword classifier |
 | `--token-budget <level>` | `minimal` / `balanced` / `generous` | `balanced` | `minimal` drops `<quality_bar>`, plus `<context>` when it is not load-bearing; `generous` expands the quality bar |
 | `--clarify <policy>` | `auto` / `always` / `never` | `auto` | `never` suppresses the questions but still emits a high-risk warning |
+| `--scaffold <policy>` | `auto` / `always` | `auto` | `auto` returns a well-specified prompt with only its padding removed |
 | `--language <code>` | `it` / `en` | auto-detect | overrides the it-vs-en evidence scorer |
 | `--audience <text>` | free text | — | injected into `<context>`; suppresses the audience question; makes `<context>` load-bearing under `minimal` |
 | `--constraints <list>` | pipe-separated | — | e.g. `--constraints "max 200 words|no markdown"` |
@@ -187,7 +188,7 @@ In Codex, `$ai-prompting`. Natural-language fallbacks work too: *"in italiano"*,
 
 **Upgrading from 0.3.x:** the separate `/ai-prompting:improve` command is gone — it was a second
 entry for the same Skill. `install-skill` removes `~/.claude/commands/ai-prompting:improve.md` when it
-installs the Claude Code skill. `npm run install-command` still works as an alias until 0.5.0.
+installs the Claude Code skill. (The `install-command` alias was removed in 0.5.0.)
 
 ## Library API
 
@@ -294,8 +295,8 @@ Sei un esperto di livello mondiale. Aiutami a scrivere una mail per chiedere un 
 **Output (`standard` mode, Italian — note the auto-detect):**
 - Stripped Italian padding (`Sei un esperto di livello mondiale`)
 - One sentence left, so it becomes the `<task>` as written — no `<objective>` repeating it
-- Task type → `correspondence`, role → `Redattore di corrispondenza professionale: chiaro, responsabile, chiude con un prossimo passo concreto.`, format → subject, greeting, short paragraphs, next step, sign-off
-- Structural coverage 36 → 54 (Δ +18)
+- Task type → `correspondence`, role → `Redattore di corrispondenza professionale.`, format → subject, greeting, short paragraphs, one concrete next step, sign-off
+- Structural coverage 36 → 52 (Δ +16)
 
 ### A high-risk prompt — triggers clarification
 
@@ -320,14 +321,14 @@ More examples in [`examples/`](examples/).
 $ npx ai-prompting doctor
 AIPrompting Doctor
 ✓ Node.js >= 18 (node v20.10.0)
-✓ package.json valid + bin entry (version 0.4.1)
+✓ package.json valid + bin entry (version 0.5.0)
 ✓ SKILL.md frontmatter (name, description) (name ✓, description ✓)
 ✓ references/ files (5/5)
 ✓ bin/ai-prompting executable
 ✓ compiled CLI artifact (dist)
 ✓ smoke test (improvePrompt) (improved length=721, delta=44)
 Status: OK
-Node: 20.10.0 | Package: 0.4.1
+Node: 20.10.0 | Package: 0.5.0
 ```
 
 If a check fails, the doctor prints a `fix:` line for it.

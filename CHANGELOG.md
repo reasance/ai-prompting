@@ -5,44 +5,62 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.4.1] — 2026-10-23
+## [0.5.0] — 2026-10-24
 
-The same probe as 0.4.0 (Claude Haiku 5.5 and Opus 5.5 reading three example prompts before and
-after the CLI), re-run on 0.4.0: both now preferred the improved version of the vague email
-request, but still preferred the original on the two prompts that were already well specified. The
-reasons they gave were all scaffold noise, fixed below. Still a qualitative self-report on three
-prompts, not a benchmark.
+Two rounds of the probe introduced in 0.4.0 (Claude Haiku 5.5 and Opus 5.5 reading three example
+prompts before and after the CLI) drove this release. On 0.4.0 both preferred the improved version
+of a vague email request but the original for the two prompts that were already well specified,
+and every reason they gave was scaffold noise. Still a qualitative self-report on three prompts,
+not a benchmark.
+
+### Changed
+
+- **Well-specified prompts keep their own structure.** A free-text prompt of 25+ words that states
+  its output (a length, count or format, or an `Output:` line) or at least two explicit constraints
+  is returned with its padding removed and nothing else. Re-sectioning such a prompt only reshuffled
+  it. New option `scaffold` (`--scaffold auto|always`, default `auto`); `always` restores the
+  scaffold for every prompt.
+- **No `<objective>` carved out of the body.** 0.4.0 lifted the first sentence into `<objective>`,
+  which split one deliverable by position (the refactor in `<objective>`, its tests in `<task>`).
+  `<objective>` is now emitted only when the user wrote one.
+- **No restated output format.** When the prompt states its output, no `<output_format>` is added:
+  a paraphrase dropped requirements (URL citations, the failure report), and a pointer back to them
+  read as filler and turned "200-word" into a strict count.
+- **`npm run install-command` removed**, as announced in 0.4.0. Use `npm run install-skill`.
 
 ### Fixed
 
-- **No placeholder `<context>`.** The `[ASSUMPTION: …]` block carried no information and models
-  read its "flag your assumptions" as a request to open with a list of assumptions. `<context>` is
-  now emitted only for real context (a user-written block or `--audience`); assumptions are still
-  reported, outside the prompt.
-- **A stated output spec is pointed at, not paraphrased.** "As stated in the task: 200-word summary;
-  three questions" dropped the requirements it left out (URL citations, the failure report). It
-  now reads "Every output requirement stated above, exactly — including: …".
+- **No placeholder `<context>`.** The `[ASSUMPTION: …]` block carried no information, and models
+  read its "flag your assumptions" as a request to open with a list of assumptions. `<context>` now
+  holds only real context — a user-written block, the prompt's own capability sentence ("You are an
+  agent with web_search…"), or `--audience`. Assumptions are still reported, outside the prompt.
 - **Prohibitions move to `<constraints>`.** Sentences such as "Preserve the public signature." and
-  "Do not introduce new dependencies." sat in `<task>` next to environment facts, where they read as
-  actions. They are now lifted into `<constraints>` verbatim.
+  "Do not introduce new dependencies." sat in `<task>`, where they read as actions. They are lifted
+  into `<constraints>` verbatim.
 - **No quality-bar line that points at nothing.** "Output matches the declared schema/format on the
   first try" (usually no schema), "Conformance to all constraints above" (a tautology) and "length,
-  tone and audience match the request" (circular when the request states none) are gone. A task
-  type with nothing checkable to add gets no `<quality_bar>`.
-- **The role no longer contradicts the task.** A prompt's own "You are …" opening sentence now
-  becomes the role instead of appearing next to ours, and the default agentic role defers to the
-  task's stop and retry rules instead of promising to "recover from errors".
-- **Coding role names the language** ("Senior TypeScript engineer.") instead of "experience in the
-  requested language/framework".
-- **Coding format matches the execution mode.** A prompt that names repository files or asks for
-  tests gets "edit the files in place, run the build and the affected tests, summarize" instead of
-  a chat-style fenced code block.
+  tone and audience match the request" (circular) are gone. A task type with nothing checkable to
+  add gets no `<quality_bar>`.
+- **Roles.** A prompt's own "You are …" role sentence becomes the role instead of appearing next to
+  ours; one that lists tools goes to `<context>`. The default agentic role defers to the task's stop
+  and retry rules instead of promising to "recover from errors". The coding role names the detected
+  language ("Senior TypeScript engineer.") instead of "the requested language/framework". The
+  correspondence role is a plain noun phrase.
+- **Coding.** A prompt that names repository files or asks for tests gets "edit the files in place;
+  if you can run commands, run the build and the affected tests; summarize" instead of a chat-style
+  code block. Refactors get "Preserve existing behavior; existing tests must still pass" — "the
+  affected tests pass" alone could be met with lenient tests.
+- **Correspondence.** The format no longer asks for "a concrete remedy", which pushed models to
+  offer refunds or discounts nobody had authorised. Complaints (an angry customer, a delay) get
+  "do not promise remedies the request does not mention" and "acknowledge and apologise before
+  explaining".
 
 ### Notes
 
-- Structural-coverage scores of CLI output are lower than in 0.4.0 (e.g. the README example
-  34 → 58 instead of 34 → 66): the sections that used to earn points were the placeholder and
-  boilerplate lines removed above. The rubric is unchanged; the output carries less noise.
+- Structural-coverage scores of CLI output are lower than in 0.4.0 (the README example 34 → 58
+  instead of 34 → 66), and a well-specified prompt scores the same before and after apart from
+  padding. The points that went away came from the placeholder and boilerplate lines removed above.
+  The rubric is unchanged.
 
 ## [0.4.0] — 2026-10-23
 

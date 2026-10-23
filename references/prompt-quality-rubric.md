@@ -42,8 +42,8 @@ What the user wants must be unambiguous.
 The opener signals (vague opener, concrete imperative) are read from the request itself — the
 `<objective>` if present, else the `<task>`, else the raw text — never from the markup around it.
 Wrapping a request in tags therefore neither earns the imperative credit nor hides a vague opener.
-A one-sentence prompt is scaffolded as `<task>` alone: an `<objective>` repeating the same sentence
-adds tokens, not intent.
+The CLI emits `<objective>` only when the user wrote one: carving the first sentence out of the
+body either repeated it or split one deliverable across two sections.
 
 ## 2. Context sufficiency (15)
 
