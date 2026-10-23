@@ -21,7 +21,7 @@ Default to `standard` unless the user signals otherwise.
 
 | Budget | Rule | Deterministic CLI |
 |---|---|---|
-| `minimal` | Drop `<quality_bar>`. Drop `<context>` when it is not load-bearing — a bare `[ASSUMPTION: …]` placeholder is not; a real audience or user-supplied context is. Drop `<role>` if the task type is implicit. Inline constraints into `<task>`. | drops `<quality_bar>` and non-load-bearing `<context>`; keeps `<role>` and the constraints block |
+| `minimal` | Drop `<quality_bar>`. Drop `<context>` when it is not load-bearing — a bare `[ASSUMPTION: …]` placeholder is not; a real audience or user-supplied context is. Drop `<role>` if the task type is implicit. Inline constraints into `<task>`. | drops `<quality_bar>` (it never emits a placeholder `<context>` at any budget); keeps `<role>` and the constraints block |
 | `balanced` *(default)* | Full canonical scaffold. | same |
 | `generous` | Add few-shot examples (3–5), expanded `<quality_bar>`, fallback strategies. | expands `<quality_bar>`; does **not** invent examples |
 

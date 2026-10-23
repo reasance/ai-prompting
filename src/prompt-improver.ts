@@ -187,8 +187,9 @@ const TASK_TYPE_HINTS: Array<{ type: TaskType; patterns: RegExp[] }> = [
 
 const ROLE_BY_TASK: Record<TaskType, { it: string; en: string }> = {
   coding: {
-    it: 'Senior software engineer con esperienza nel linguaggio/framework richiesto.',
-    en: 'Senior software engineer with experience in the requested language/framework.',
+    // Overridden by codingRole() when the prompt names a language.
+    it: 'Senior software engineer.',
+    en: 'Senior software engineer.',
   },
   research: {
     it: 'Senior research analyst con metodo rigoroso di citazione e triangolazione delle fonti.',
@@ -211,8 +212,8 @@ const ROLE_BY_TASK: Record<TaskType, { it: string; en: string }> = {
     en: 'Information-extraction specialist working against a deterministic schema.',
   },
   'agentic-workflow': {
-    it: 'Agente che usa strumenti: chiama un tool solo quando lo step lo richiede, gestisce gli errori, si ferma su criteri espliciti.',
-    en: 'Tool-using agent: calls a tool only when a step needs it, recovers from errors, stops on explicit criteria.',
+    it: 'Agente che usa strumenti: chiama un tool solo quando lo step lo richiede e segue le regole di stop e di retry del task.',
+    en: 'Tool-using agent: calls a tool only when a step needs it and follows the task\'s stop and retry rules.',
   },
   creative: {
     it: 'Autore creativo con voce distintiva e attenzione al dettaglio.',
@@ -254,8 +255,8 @@ const OUTPUT_FORMAT_BY_TASK: Record<TaskType, { it: string; en: string }> = {
     en: 'Subject line; greeting; 2-4 short paragraphs; a concrete next step or remedy; sign-off. Unknown specifics as [placeholders].',
   },
   'data-extraction': {
-    it: 'Solo JSON valido conforme allo schema. Nessuna prosa. Campi mancanti = null. evidence_quote testuale, non parafrasi.',
-    en: 'Valid JSON only, conforming to the schema. No prose. Missing fields = null. evidence_quote must be verbatim, not paraphrase.',
+    it: 'Solo JSON valido (conforme allo schema, se ne è dato uno). Nessuna prosa. Campi mancanti = null. evidence_quote testuale, non parafrasi.',
+    en: 'Valid JSON only (conforming to the schema, if one is given). No prose. Missing fields = null. evidence_quote must be verbatim, not paraphrase.',
   },
   'agentic-workflow': {
     it: 'Prima il risultato finale; poi un breve registro delle azioni (tool → esito, una riga ciascuna) e gli eventuali punti irrisolti.',
@@ -539,12 +540,16 @@ const DEFAULT_CONSTRAINTS: Record<ConstraintGroup, DefaultLine[]> = {
   ],
 };
 
+// Only lines a reviewer could check against the output. "Matches the declared
+// schema on the first try" pointed at a schema that usually did not exist, and
+// "length, tone and audience match the request" was circular when the request
+// stated none of them; both read as boilerplate to the models we probed.
 const DEFAULT_QUALITY_BAR: Record<ConstraintGroup, DefaultLine[]> = {
   evidence: [{ it: 'Risposta verificabile: ogni claim non banale ha evidenza o fonte.', en: 'Answer is verifiable: every non-trivial claim has evidence or a source.' }],
   coding: [{ it: 'Compila senza errori e i test interessati passano.', en: 'Builds cleanly and the affected tests pass.' }],
-  prose: [{ it: 'Lunghezza, tono e pubblico corrispondono alla richiesta.', en: 'Length, tone, and audience match the request.' }],
-  extraction: [{ it: 'L\'output è JSON valido rispetto allo schema; ogni valore è riconducibile alla fonte.', en: 'Output is valid JSON against the schema; every value is traceable to the source.' }],
-  agentic: [{ it: 'Ogni step ha un criterio di stop osservabile.', en: 'Every step has an observable stop criterion.' }],
+  prose: [],
+  extraction: [{ it: 'L\'output è JSON valido; ogni valore è riconducibile alla fonte.', en: 'Output is valid JSON; every value is traceable to the source.' }],
+  agentic: [{ it: 'Termina con il risultato, oppure con un resoconto di cosa è stato tentato e perché si è fermato.', en: 'Ends with the deliverable, or with a report of what was tried and why it stopped.' }],
   general: [],
 };
 
@@ -634,6 +639,58 @@ function inferConstraints(opts: PromptImproverOptions, lang: 'it' | 'en', taskTy
   return out;
 }
 
+// A role the user wrote themselves ("You are an agent with web_search…") is
+// the role. Adding ours next to it gave the model two.
+const USER_ROLE_RE = /^(?:you\s+are|sei)\s+\S/i;
+
+// Prohibitions and invariants read as actions when they sit in <task> next to
+// environment facts; they belong in <constraints>.
+const IMPERATIVE_CONSTRAINT_RE =
+  /^(?:do\s+not|don['’]t|never|always|must|preserve|keep|avoid|only|no\s+new|non\s|mai\s|sempre\s|evita|mantieni|preserva|niente\s|senza\s)/i;
+
+const CODE_LANGUAGES: Array<[RegExp, string]> = [
+  [/\btypescript\b|\.tsx?\b/i, 'TypeScript'],
+  [/\bjavascript\b|\.[mc]?jsx?\b/i, 'JavaScript'],
+  [/\bpython\b|\.py\b/i, 'Python'],
+  [/\brust\b|\.rs\b/i, 'Rust'],
+  [/\bgolang\b|\.go\b/i, 'Go'],
+  [/\bkotlin\b|\.kt\b/i, 'Kotlin'],
+  [/\bjava\b|\.java\b/i, 'Java'],
+  [/\bswift\b/i, 'Swift'],
+  [/\bruby\b|\.rb\b/i, 'Ruby'],
+  [/\bphp\b/i, 'PHP'],
+  [/\bc#|\.cs\b/i, 'C#'],
+  [/\bc\+\+|\.(?:cpp|cc|hpp)\b/i, 'C++'],
+  [/\bsql\b/i, 'SQL'],
+];
+
+/** "Senior software engineer with experience in the requested language" left the slot unfilled. */
+function codingRole(text: string, lang: 'it' | 'en'): string {
+  const hit = CODE_LANGUAGES.find(([re]) => re.test(text));
+  if (!hit) return ROLE_BY_TASK.coding[lang];
+  return lang === 'it' ? `Senior software engineer esperto di ${hit[1]}.` : `Senior ${hit[1]} engineer.`;
+}
+
+// A prompt that names repository files, or asks for tests, is work an agent does
+// in the repo; a chat-style "code in a fenced block" format changes how it runs.
+const REPO_TASK_RE =
+  /(?:^|[\s`'"(])(?:[\w.-]+\/)*[\w-]+\.(?:ts|tsx|js|jsx|mjs|cjs|py|rs|go|java|kt|rb|php|cs|cpp|cc|h|swift|sql)\b|\b(?:src|lib|tests?|app)\/|\b(?:unit\s+)?tests?\b|\btest\s+(?:di\s+)?unit/i;
+
+const REPO_CODING_FORMAT = {
+  it: 'Modifica i file direttamente; esegui la build e i test interessati; rispondi con un breve riepilogo delle modifiche e dei risultati dei test.',
+  en: 'Edit the files in place; run the build and the affected tests; reply with a short summary of what changed and the test results.',
+};
+
+function removeSentence(text: string, sentence: string): string {
+  const i = text.indexOf(sentence);
+  if (i === -1) return text;
+  return (text.slice(0, i) + text.slice(i + sentence.length))
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/ +\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 function buildScaffold(
   scaffold: ParsedScaffold,
   opts: PromptImproverOptions,
@@ -644,18 +701,27 @@ function buildScaffold(
   const supplied = scaffold.sections;
   // Everything outside the recognized prefix scaffold is untrusted data.
   const safeBody = neutralizeScaffoldTags(scaffold.body).trim();
+  const budget = opts.tokenBudget || 'balanced';
 
-  const role = supplied.role || ROLE_BY_TASK[taskType][lang];
-  if (!supplied.role) {
+  // Role: the user's own, then a "You are …" opening sentence, then the default.
+  let role: string;
+  let body = safeBody;
+  const firstSentence = splitSentences(safeBody)[0] || '';
+  if (supplied.role) {
+    role = supplied.role;
+  } else if (USER_ROLE_RE.test(firstSentence) && splitSentences(safeBody).length > 1) {
+    role = firstSentence;
+    body = removeSentence(safeBody, firstSentence);
+    changes.push({ type: 'preserved_user_text', detail: 'role (the prompt\'s own "You are…" sentence, moved to <role>)' });
+  } else {
+    role = taskType === 'coding' ? codingRole(safeBody, lang) : ROLE_BY_TASK[taskType][lang];
     changes.push({ type: 'inferred_role', detail: `Role inferred from task type "${taskType}".` });
   }
-
-  const budget = opts.tokenBudget || 'balanced';
 
   // <objective> and <task> used to carry the same sentence verbatim. Now the
   // objective is lifted *out* of the body: it is emitted only when the body has
   // more to say than that one sentence. A one-sentence prompt is just a <task>.
-  const source = extractObjective(scaffold, lang);
+  const source = extractObjective({ sections: supplied, body }, lang);
   let objective: string | null = null;
   let taskBody: string;
   if (supplied.task) {
@@ -664,76 +730,82 @@ function buildScaffold(
     objective = supplied.objective || supplied.goal || (source.sentence ? source.objective : null);
   } else if (supplied.objective || supplied.goal) {
     objective = source.objective;
-    taskBody = safeBody;
-  } else if (source.sentence && safeBody.startsWith(source.sentence)) {
-    const rest = safeBody.slice(source.sentence.length).trim();
+    taskBody = body;
+  } else if (source.sentence && body.startsWith(source.sentence)) {
+    const rest = body.slice(source.sentence.length).trim();
     if (rest) {
       objective = source.objective;
       taskBody = rest;
       changes.push({ type: 'added_section', detail: 'objective (first sentence lifted out of the task)' });
     } else {
-      taskBody = safeBody;
+      taskBody = body;
     }
   } else {
-    taskBody = safeBody;
+    taskBody = body;
   }
   if (!taskBody) taskBody = objective || '';
   if (!supplied.task) {
     changes.push({ type: 'added_section', detail: 'task (wraps original prompt body)' });
   }
 
-  const existingContext = supplied.context;
-  let context: string;
-  if (existingContext) {
-    context = existingContext;
-  } else if (opts.audience) {
-    context = `Audience: ${opts.audience}.`;
-  } else {
-    // This used to say "no additional context provided", which is false
-    // whenever the body itself states facts (TS 5.4, Node 20, no ESM). A literal
-    // model can read that as permission to discount them. No literal tag name
-    // here: the scorer and the tests locate sections by their tags.
-    context =
-      lang === 'it'
-        ? '[ASSUNZIONE: nessun blocco di contesto separato; i fatti indicati nel task sono il contesto — segnala le ipotesi rilevanti]'
-        : '[ASSUMPTION: no separate context block; the facts stated in the task are the context — flag load-bearing assumptions]';
+  // Specs and redundancy checks read the whole request, before anything is
+  // lifted out of the task.
+  const fullTask = supplied.task || body;
+
+  // Prohibitions and invariants move from <task> to <constraints>, verbatim.
+  const lifted: string[] = [];
+  if (!supplied.task) {
+    const sentences = splitSentences(taskBody);
+    const candidates = sentences.filter((sentence) => IMPERATIVE_CONSTRAINT_RE.test(sentence));
+    if (candidates.length && candidates.length < sentences.length) {
+      for (const c of candidates) {
+        taskBody = removeSentence(taskBody, c);
+        lifted.push(c.replace(/[.;]+$/, '.'));
+      }
+      changes.push({ type: 'extracted_constraint', detail: `${lifted.length} constraint(s) moved from the task to <constraints>` });
+    }
   }
-  // Under `minimal` the context block only earns its tokens when it carries real
-  // facts. A bare [ASSUMPTION: ...] placeholder does not, so it gets dropped.
-  const contextIsPlaceholder = !existingContext && !opts.audience;
-  const dropContext = budget === 'minimal' && contextIsPlaceholder;
-  if (dropContext) {
-    changes.push({ type: 'dropped_section', detail: 'context (token-budget=minimal, not load-bearing)' });
-  } else if (!existingContext) {
-    changes.push({ type: 'added_section', detail: 'context' });
-  }
+
+  // No placeholder <context>. A block saying "no separate context" carried no
+  // information, and models read its "flag your assumptions" as a request to
+  // open with a list of assumptions. Assumptions are reported outside the prompt.
+  const context = supplied.context || (opts.audience ? `Audience: ${opts.audience}.` : null);
+  if (context && !supplied.context) changes.push({ type: 'added_section', detail: 'context (audience)' });
 
   const group = CONSTRAINT_GROUP[taskType];
 
   // The user's own constraints are kept and the inferred ones appended, instead
   // of being detected, silently discarded, and replaced by generic defaults.
-  const inferred = inferConstraints(opts, lang, taskType, taskBody);
+  const inferred = inferConstraints(opts, lang, taskType, fullTask);
   const constraintLines: string[] = [];
   if (supplied.constraints) {
     constraintLines.push(...splitBulletBlock(supplied.constraints));
     changes.push({ type: 'preserved_user_text', detail: 'constraints (user-supplied, kept verbatim)' });
   }
-  for (const c of inferred) {
+  for (const c of [...lifted, ...inferred]) {
     if (!constraintLines.some((line) => line.toLowerCase() === c.toLowerCase())) constraintLines.push(c);
   }
-  if (!supplied.constraints && constraintLines.length) {
+  if (inferred.length && !opts.constraints?.length) {
     changes.push({ type: 'added_section', detail: `constraints (defaults for "${taskType}")` });
   }
   const constraintsBlock = constraintLines.map((c) => `- ${c}`).join('\n');
 
-  // A length, count or format the user stated always beats the task-type default.
-  const specs = supplied.output_format ? [] : detectOutputSpecs(taskBody);
+  // A length, count or format the user stated always beats the task-type
+  // default — and is pointed at, not paraphrased: a short restatement used to
+  // drop the requirements it left out (URL citations, the failure report).
+  const specs = supplied.output_format ? [] : detectOutputSpecs(fullTask);
   let outputFormat: string;
   if (supplied.output_format) {
     outputFormat = supplied.output_format;
   } else if (specs.length) {
-    outputFormat = `${lang === 'it' ? 'Come indicato nel task' : 'As stated in the task'}: ${specs.join('; ')}.`;
-    changes.push({ type: 'preserved_user_text', detail: 'output_format (user-stated spec kept; task-type default not applied)' });
+    outputFormat =
+      lang === 'it'
+        ? `Ogni requisito di output indicato sopra, alla lettera — tra cui: ${specs.join('; ')}.`
+        : `Every output requirement stated above, exactly — including: ${specs.join('; ')}.`;
+    changes.push({ type: 'preserved_user_text', detail: 'output_format (points at the user-stated spec; task-type default not applied)' });
+  } else if (taskType === 'coding' && REPO_TASK_RE.test(fullTask)) {
+    outputFormat = REPO_CODING_FORMAT[lang];
+    changes.push({ type: 'added_section', detail: 'output_format (repository task: edit in place, run tests, summarize)' });
   } else {
     outputFormat = OUTPUT_FORMAT_BY_TASK[taskType][lang];
     changes.push({ type: 'added_section', detail: 'output_format' });
@@ -745,19 +817,14 @@ function buildScaffold(
     qualityBar = splitBulletBlock(supplied.quality_bar);
     changes.push({ type: 'preserved_user_text', detail: 'quality_bar (user-supplied, kept verbatim)' });
   } else {
-    qualityBar = applicableDefaults(DEFAULT_QUALITY_BAR[group], taskBody, lang);
-    if (constraintLines.length) {
-      qualityBar.push(lang === 'it' ? 'Conformità a tutti i constraints sopra.' : 'Conformance to all constraints above.');
+    qualityBar = applicableDefaults(DEFAULT_QUALITY_BAR[group], fullTask, lang);
+    if (specs.length) {
+      qualityBar.push(
+        lang === 'it'
+          ? 'Rispetta ogni lunghezza, quantità e formato indicati sopra.'
+          : 'Respects every length, count, and format stated above.',
+      );
     }
-    qualityBar.push(
-      specs.length
-        ? lang === 'it'
-          ? 'Rispetta ogni lunghezza, quantità e formato indicati nel task.'
-          : 'Respects every length, count, and format stated in the task.'
-        : lang === 'it'
-          ? 'Output conforme allo schema/formato indicato al primo tentativo.'
-          : 'Output matches the declared schema/format on the first try.',
-    );
   }
   if (budget === 'generous') {
     qualityBar.push(
@@ -774,7 +841,7 @@ function buildScaffold(
   const qualityBlock = qualityBar.map((q) => `- ${q}`).join('\n');
   // `minimal` buys its savings here: the quality bar is the most expendable
   // block because it constrains self-review, not the deliverable itself.
-  const dropQualityBar = budget === 'minimal';
+  const dropQualityBar = budget === 'minimal' && qualityBar.length > 0;
   if (dropQualityBar) {
     changes.push({ type: 'dropped_section', detail: 'quality_bar (token-budget=minimal)' });
   }
@@ -783,13 +850,13 @@ function buildScaffold(
 
   const sections: string[] = [`<role>\n${role}\n</role>`];
   if (objective) sections.push(`<objective>\n${objective}\n</objective>`);
-  if (!dropContext) sections.push(`<context>\n${context}\n</context>`);
+  if (context) sections.push(`<context>\n${context}\n</context>`);
   sections.push(`<task>\n${taskBody}\n</task>`);
-  // Every default can be skipped when the task already says it; an empty
-  // section is noise, so it goes.
+  // Every section is optional except role, task and output format: a section
+  // with nothing true to say is noise.
   if (constraintLines.length) sections.push(`<constraints>\n${constraintsBlock}\n</constraints>`);
   sections.push(`<output_format>\n${outputFormat}\n</output_format>`);
-  if (!dropQualityBar) sections.push(`<quality_bar>\n${qualityBlock}\n</quality_bar>`);
+  if (qualityBar.length && !dropQualityBar) sections.push(`<quality_bar>\n${qualityBlock}\n</quality_bar>`);
 
   return sections.join('\n\n');
 }

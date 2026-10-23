@@ -275,15 +275,13 @@ You are a world-class expert. Take a deep breath. Help me write something good.
 ```
 ## Improved prompt
 <role>Senior editor focused on clarity, rhythm, and audience fit.</role>
-<context>[ASSUMPTION: no separate context block; the facts stated in the task are the context — flag load-bearing assumptions]</context>
 <task>Help me write something good.</task>
 <constraints>
 - Unknown specifics (names, dates, figures) go in [brackets]; never invent them.
 </constraints>
 <output_format>Flowing prose; 60-90 word paragraphs; no bullets unless a real list; title + subtitle when appropriate.</output_format>
-<quality_bar>...</quality_bar>
 
-Structural coverage — Original: 34/100  →  Improved: 66/100  (Δ +32)
+Structural coverage — Original: 34/100  →  Improved: 58/100  (Δ +24)
 ```
 
 ### An Italian prompt with persona padding
@@ -297,7 +295,7 @@ Sei un esperto di livello mondiale. Aiutami a scrivere una mail per chiedere un 
 - Stripped Italian padding (`Sei un esperto di livello mondiale`)
 - One sentence left, so it becomes the `<task>` as written — no `<objective>` repeating it
 - Task type → `correspondence`, role → `Redattore di corrispondenza professionale: chiaro, responsabile, chiude con un prossimo passo concreto.`, format → subject, greeting, short paragraphs, next step, sign-off
-- Structural coverage 36 → 63 (Δ +27)
+- Structural coverage 36 → 54 (Δ +18)
 
 ### A high-risk prompt — triggers clarification
 
@@ -322,14 +320,14 @@ More examples in [`examples/`](examples/).
 $ npx ai-prompting doctor
 AIPrompting Doctor
 ✓ Node.js >= 18 (node v20.10.0)
-✓ package.json valid + bin entry (version 0.4.0)
+✓ package.json valid + bin entry (version 0.4.1)
 ✓ SKILL.md frontmatter (name, description) (name ✓, description ✓)
 ✓ references/ files (5/5)
 ✓ bin/ai-prompting executable
 ✓ compiled CLI artifact (dist)
 ✓ smoke test (improvePrompt) (improved length=721, delta=44)
 Status: OK
-Node: 20.10.0 | Package: 0.4.0
+Node: 20.10.0 | Package: 0.4.1
 ```
 
 If a check fails, the doctor prints a `fix:` line for it.

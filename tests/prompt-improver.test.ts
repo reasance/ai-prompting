@@ -125,22 +125,19 @@ test('improvePrompt: English help-me opener nominalized', () => {
 // --token-budget is only worth having if it actually shrinks the generated
 // prompt. `minimal` used to emit all seven sections and merely swap two default
 // constraint lines for one, so it saved ~9% where the docs promised two blocks.
-test('improvePrompt: token-budget minimal drops <context> and <quality_bar>', () => {
-  const original = 'Write a launch email for the new pricing page.';
+test('improvePrompt: token-budget minimal drops <quality_bar>', () => {
+  const original = 'Research the adoption of passkeys in European banking apps.';
   const minimal = improvePrompt({ originalPrompt: original, tokenBudget: 'minimal' });
   const balanced = improvePrompt({ originalPrompt: original, tokenBudget: 'balanced' });
 
-  assert.ok(!minimal.improved.includes('<context>'), '<context> should be dropped under minimal');
   assert.ok(!minimal.improved.includes('<quality_bar>'), '<quality_bar> should be dropped under minimal');
-  assert.ok(balanced.improved.includes('<context>'), '<context> must survive under balanced');
   assert.ok(balanced.improved.includes('<quality_bar>'), '<quality_bar> must survive under balanced');
-
   assert.ok(
     minimal.improved.length < balanced.improved.length,
     `minimal (${minimal.improved.length}) must be shorter than balanced (${balanced.improved.length})`
   );
   const dropped = minimal.changes.filter((c) => c.type === 'dropped_section');
-  assert.equal(dropped.length, 2, 'both drops must be reported in the change list');
+  assert.equal(dropped.length, 1, 'the drop must be reported in the change list');
 });
 
 test('improvePrompt: minimal keeps <context> when it is load-bearing', () => {
@@ -242,12 +239,12 @@ test('improvePrompt: input cannot break out of <task> into control structure', (
 
   // Exactly one of each structural tag: the injection must not have created a
   // second constraints block or a second task block.
-  // <objective> is optional (a one-sentence body is emitted as <task> only),
-  // so it may appear at most once; the rest exactly once.
+  // <objective> and <context> are optional (emitted only with something to
+  // say), so they may appear at most once; the rest exactly once.
   for (const tag of ['role', 'objective', 'context', 'task', 'constraints', 'output_format', 'quality_bar']) {
     const opens = (r.improved.match(new RegExp(`<${tag}>`, 'g')) || []).length;
     const closes = (r.improved.match(new RegExp(`</${tag}>`, 'g')) || []).length;
-    const expected = tag === 'objective' ? opens : 1;
+    const expected = tag === 'objective' || tag === 'context' ? opens : 1;
     assert.ok(opens <= 1, `expected at most one <${tag}>, got ${opens}`);
     assert.equal(opens, expected, `expected exactly one <${tag}>, got ${opens}`);
     assert.equal(closes, opens, `unbalanced <${tag}>: ${opens} open, ${closes} close`);
@@ -474,7 +471,7 @@ test('output format: an "Output:" line is kept as the format', () => {
   const r = improvePrompt({ originalPrompt: example('research-prompt.md') });
   assert.equal(
     sectionOf(r.improved, 'output_format'),
-    'As stated in the task: 600-word summary with inline citations and a numbered source list.',
+    'Every output requirement stated above, exactly — including: 600-word summary with inline citations and a numbered source list.',
   );
 });
 
@@ -500,7 +497,7 @@ test('defaults: a default the task already states is not repeated', () => {
   // The coding example says "Preserve the public signature" and "Do not
   // introduce new dependencies"; both coding defaults are redundant there.
   const r = improvePrompt({ originalPrompt: example('coding-prompt.md') });
-  assert.equal(sectionOf(r.improved, 'constraints'), null, 'an all-redundant constraints block should be omitted');
+  assert.equal(sectionOf(r.improved, 'constraints'), '- Preserve the public signature.\n- Do not introduce new dependencies.');
 });
 
 test('objective: never repeats the first sentence of the task', () => {
@@ -514,12 +511,74 @@ test('objective: never repeats the first sentence of the task', () => {
   assert.equal(sectionOf(single.improved, 'objective'), null, 'a one-sentence prompt is a task, not task + objective');
 });
 
-test('context placeholder: never claims that no context was given', () => {
+// --- 0.4.1: what the probes still flagged on 0.4.0 -----------------------
+
+test('context: no placeholder block; only real context is emitted', () => {
+  // The placeholder carried no information and invited an assumptions preamble.
   for (const language of ['it', 'en'] as const) {
     const r = improvePrompt({ originalPrompt: example('coding-prompt.md'), language });
-    const ctx = sectionOf(r.improved, 'context') || '';
-    assert.ok(!/no additional context provided|nessun contesto aggiuntivo fornito/i.test(ctx), ctx);
+    assert.equal(sectionOf(r.improved, 'context'), null);
+    assert.ok(r.assumptions.length > 0, 'assumptions are still reported, outside the prompt');
   }
+  const withAudience = improvePrompt({ originalPrompt: 'Write the release notes for v2.', audience: 'enterprise admins' });
+  assert.equal(sectionOf(withAudience.improved, 'context'), 'Audience: enterprise admins.');
+});
+
+test('output format: points at the stated requirements instead of paraphrasing them', () => {
+  const r = improvePrompt({ originalPrompt: example('agentic-tool-prompt.md') });
+  const fmt = sectionOf(r.improved, 'output_format') || '';
+  assert.match(fmt, /^Every output requirement stated above, exactly — including:/);
+  // What a lossy restatement used to drop must still be in the prompt.
+  assert.match(r.improved, /Cite every claim with a URL\./);
+  assert.match(r.improved, /stop and report/);
+});
+
+test('constraints: prohibitions move out of the task, verbatim', () => {
+  const r = improvePrompt({ originalPrompt: example('coding-prompt.md') });
+  const task = sectionOf(r.improved, 'task') || '';
+  assert.ok(!/Preserve the public signature|Do not introduce new dependencies/.test(task), task);
+  assert.match(task, /Add unit tests covering/);
+  assert.match(task, /TypeScript 5\.4, Node 20, no ESM/, 'environment facts stay where they were');
+  // A prompt that is nothing but a prohibition keeps it as its task.
+  const only = improvePrompt({ originalPrompt: 'Do not change the public API.' });
+  assert.match(sectionOf(only.improved, 'task') || '', /Do not change the public API\./);
+});
+
+test('quality bar: no line that points at something the prompt does not have', () => {
+  for (const prompt of [example('coding-prompt.md'), example('agentic-tool-prompt.md'), 'Scrivi una mail a un cliente arrabbiato per un ritardo.']) {
+    const r = improvePrompt({ originalPrompt: prompt });
+    assert.ok(!/schema\/format on the first try|schema\/formato indicato al primo tentativo/.test(r.improved), 'nonexistent schema');
+    assert.ok(!/Conformance to all constraints above|Conformità a tutti i constraints/.test(r.improved), 'tautology');
+    assert.ok(!/match the request|corrispondono alla richiesta/.test(r.improved), 'circular when the request states none');
+  }
+  const email = improvePrompt({ originalPrompt: 'Scrivi una mail a un cliente arrabbiato per un ritardo.' });
+  assert.equal(sectionOf(email.improved, 'quality_bar'), null, 'nothing checkable to say → no section');
+});
+
+test('role: the prompt\'s own "You are…" sentence is the role, and ours does not contradict the task', () => {
+  const r = improvePrompt({ originalPrompt: example('agentic-tool-prompt.md') });
+  assert.equal(sectionOf(r.improved, 'role'), 'You are an agent with web_search, file_read, and code_exec tools.');
+  assert.equal((r.improved.match(/You are an agent/g) || []).length, 1, 'role stated twice');
+  // Without a user role the default must defer to the task's stop/retry rules.
+  const fallback = improvePrompt({ originalPrompt: 'Use the search tools to find three sources. Stop after 2 attempts.' });
+  assert.ok(!/recovers from errors/.test(fallback.improved));
+  assert.match(sectionOf(fallback.improved, 'role') || '', /follows the task's stop and retry rules/);
+});
+
+test('role: coding names the language instead of an unfilled slot', () => {
+  const ts = improvePrompt({ originalPrompt: example('coding-prompt.md') });
+  assert.equal(sectionOf(ts.improved, 'role'), 'Senior TypeScript engineer.');
+  const py = improvePrompt({ originalPrompt: 'Refactor the class in app/models.py to use dataclasses.', language: 'it' });
+  assert.equal(sectionOf(py.improved, 'role'), 'Senior software engineer esperto di Python.');
+  const none = improvePrompt({ originalPrompt: 'Fix the bug in the auth flow.' });
+  assert.ok(!/requested language/.test(none.improved));
+});
+
+test('coding format: a repository task is edited in place, not answered in chat', () => {
+  const repo = improvePrompt({ originalPrompt: example('coding-prompt.md') });
+  assert.match(sectionOf(repo.improved, 'output_format') || '', /^Edit the files in place; run the build and the affected tests/);
+  const chat = improvePrompt({ originalPrompt: 'Write a function that debounces a callback.' });
+  assert.match(sectionOf(chat.improved, 'output_format') || '', /^Code in a fenced block/);
 });
 
 test('correspondence: an email gets a letter, not an article', () => {

@@ -173,7 +173,8 @@ test('CLI: --clarify never suppresses the clarifying-questions block', () => {
 });
 
 test('CLI: --token-budget minimal produces a shorter prompt than balanced', () => {
-  const prompt = 'Write a launch email for the new pricing page.';
+  // A research prompt: its type carries a default quality bar for minimal to drop.
+  const prompt = 'Research the adoption of passkeys in European banking apps.';
   const minimal = runCli(['improve', '--prompt', prompt, '--token-budget', 'minimal', '--mode', 'final_only']);
   const balanced = runCli(['improve', '--prompt', prompt, '--token-budget', 'balanced', '--mode', 'final_only']);
   assert.ok(!minimal.out.includes('<quality_bar>'));

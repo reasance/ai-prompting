@@ -5,6 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] — 2026-10-23
+
+The same probe as 0.4.0 (Claude Haiku 5.5 and Opus 5.5 reading three example prompts before and
+after the CLI), re-run on 0.4.0: both now preferred the improved version of the vague email
+request, but still preferred the original on the two prompts that were already well specified. The
+reasons they gave were all scaffold noise, fixed below. Still a qualitative self-report on three
+prompts, not a benchmark.
+
+### Fixed
+
+- **No placeholder `<context>`.** The `[ASSUMPTION: …]` block carried no information and models
+  read its "flag your assumptions" as a request to open with a list of assumptions. `<context>` is
+  now emitted only for real context (a user-written block or `--audience`); assumptions are still
+  reported, outside the prompt.
+- **A stated output spec is pointed at, not paraphrased.** "As stated in the task: 200-word summary;
+  three questions" dropped the requirements it left out (URL citations, the failure report). It
+  now reads "Every output requirement stated above, exactly — including: …".
+- **Prohibitions move to `<constraints>`.** Sentences such as "Preserve the public signature." and
+  "Do not introduce new dependencies." sat in `<task>` next to environment facts, where they read as
+  actions. They are now lifted into `<constraints>` verbatim.
+- **No quality-bar line that points at nothing.** "Output matches the declared schema/format on the
+  first try" (usually no schema), "Conformance to all constraints above" (a tautology) and "length,
+  tone and audience match the request" (circular when the request states none) are gone. A task
+  type with nothing checkable to add gets no `<quality_bar>`.
+- **The role no longer contradicts the task.** A prompt's own "You are …" opening sentence now
+  becomes the role instead of appearing next to ours, and the default agentic role defers to the
+  task's stop and retry rules instead of promising to "recover from errors".
+- **Coding role names the language** ("Senior TypeScript engineer.") instead of "experience in the
+  requested language/framework".
+- **Coding format matches the execution mode.** A prompt that names repository files or asks for
+  tests gets "edit the files in place, run the build and the affected tests, summarize" instead of
+  a chat-style fenced code block.
+
+### Notes
+
+- Structural-coverage scores of CLI output are lower than in 0.4.0 (e.g. the README example
+  34 → 58 instead of 34 → 66): the sections that used to earn points were the placeholder and
+  boilerplate lines removed above. The rubric is unchanged; the output carries less noise.
+
 ## [0.4.0] — 2026-10-23
 
 A model-landscape review (latest releases from Anthropic, OpenAI, Google, xAI, Meta, Mistral,

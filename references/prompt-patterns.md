@@ -212,22 +212,30 @@ Se le quotes sono insufficienti, dichiaralo invece di estrapolare.
 ## Defaults the CLI fills in
 
 When the prompt is silent, the deterministic CLI adds defaults keyed on the task type — never on
-a model. A default is skipped when the task already says it, and a length, count or format the user
-stated (`200-word summary`, `3 bullet`, an `Output:` line) always replaces the task-type
-`<output_format>`.
+a model. It adds a section only when it has something true and checkable to put in it:
+
+- **Role.** A "You are …" opening sentence is the user's role and moves to `<role>`; otherwise the
+  task type's role, with the detected language for coding ("Senior TypeScript engineer.").
+- **Context.** Only real context: a `<context>` the user wrote, or `--audience`. No placeholder —
+  assumptions are reported next to the prompt, not inside it.
+- **Constraints.** Sentences that prohibit or require ("Do not …", "Preserve …", "Never …", "Only …")
+  move from the task to `<constraints>` verbatim; the task-type defaults below are added unless the
+  prompt already says them.
+- **Output format.** A length, count or format the user stated (`200-word summary`, `3 bullet`, an
+  `Output:` line) is pointed at, not paraphrased: "Every output requirement stated above, exactly —
+  including: …". A coding prompt that names repository files or asks for tests gets "edit the files
+  in place, run the build and the affected tests, summarize" instead of a chat-style code block.
+- **Quality bar.** Only the lines below, plus "respects every length, count and format stated above"
+  when the user stated one. A type with nothing checkable to add gets no section.
 
 | Task type | Default `<constraints>` | Default `<quality_bar>` |
 |---|---|---|
 | research · analysis · business · education | distinguish facts / inferences / assumptions; declare missing info | every non-trivial claim has evidence or a source |
 | coding | preserve public interfaces; no new dependencies | builds cleanly, affected tests pass |
-| writing · correspondence · creative | unknown specifics in `[brackets]`, never invented | length, tone and audience match the request |
-| data-extraction | missing fields are `null`, never inferred | valid JSON against the schema, values traceable to the source |
-| agentic-workflow | on tool error retry once, then fall back or report | every step has an observable stop criterion |
+| writing · correspondence · creative | unknown specifics in `[brackets]`, never invented | — |
+| data-extraction | missing fields are `null`, never inferred | valid JSON, values traceable to the source |
+| agentic-workflow | on tool error retry once, then fall back or report | ends with the deliverable or a report of what was tried and why it stopped |
 | general | declare missing info | — |
-
-Every row also gets "conformance to the constraints above" (when there are any) and either "matches
-the declared format" or, when the user stated one, "respects every length, count and format stated
-in the task".
 
 ## When to choose which
 
