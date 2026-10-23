@@ -44,7 +44,7 @@ jobs:
           fetch-depth: 0 # needed to prove the tag is on main
 
       - name: Setup Node 24
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 24
           registry-url: 'https://registry.npmjs.org'
